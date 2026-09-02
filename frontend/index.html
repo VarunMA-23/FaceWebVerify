@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Face-Web-Blockchain Pipeline</title>
+<style>
+  :root { --bg:#0f1115; --panel:#1a1d24; --border:#2a2f3a; --text:#e6e8ee;
+          --muted:#9aa3b2; --accent:#4f8cff; --ok:#2ecc71; --warn:#f1c40f;
+          --stage-bg:#141720; --stage-border:#2a2f3a; --stage-active:#4f8cff;
+          --stage-done:#2ecc71; --stage-wait:#3a3f4a; --pulse:#4f8cff33; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.5; }
+  .wrap { max-width:960px; margin:0 auto; padding:24px; }
+  h1 { font-size:22px; margin:0 0 4px; font-weight:600; }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:24px; }
+  .panel { background:var(--panel); border:1px solid var(--border);
+           border-radius:12px; padding:20px; margin-bottom:20px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:8px; }
+  input[type=file] { display:block; margin-bottom:12px; }
+  button { background:var(--accent); color:#fff; border:none; padding:10px 18px;
+           border-radius:8px; font-size:14px; cursor:pointer; font-weight:500;
+           transition: opacity .2s; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .status { font-size:14px; margin-top:12px; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px; }
+  .b-ok { background:rgba(46,204,113,.15); color:var(--ok); }
+  .b-warn { background:rgba(241,196,15,.15); color:var(--warn); }
+  .b-mute { background:rgba(154,163,178,.15); color:var(--muted); }
+  .kv { display:grid; grid-template-columns:170px 1fr; gap:6px 12px; font-size:14px; }
+  .kv b { color:var(--muted); font-weight:500; }
+  .card { border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-top:10px; }
+  .card .row { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
+  .muted { color:var(--muted); }
+  code { background:#0d0f13; padding:1px 6px; border-radius:4px; font-size:12px;
+         word-break:break-all; }
+
+  /* ===== Result Cards ===== */
+  .result-header { display:flex; align-items:center; justify-content:space-between;
+                   margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+  .result-header h2 { font-size:18px; font-weight:600; margin:0; }
+  .result-stats { display:flex; gap:10px; }
+  .stat-pill { display:flex; align-items:center; gap:6px; background:var(--stage-bg);
+               border:1px solid var(--border); border-radius:20px; padding:6px 14px;
+               font-size:13px; color:var(--muted); }
+  .stat-pill .num { font-weight:700; color:var(--text); font-size:15px; }
+
+  .best-match-banner { background:linear-gradient(135deg, rgba(46,204,113,.08), rgba(79,140,255,.08));
+                       border:1px solid rgba(46,204,113,.3); border-radius:12px;
+                       padding:16px 20px; margin-bottom:20px; display:flex;
+                       align-items:center; gap:16px; }
+  .best-match-banner .trophy { font-size:28px; }
+  .best-match-banner .info h3 { font-size:15px; margin:0 0 2px; color:var(--ok); }
+  .best-match-banner .info p { font-size:13px; color:var(--muted); margin:0; }
+
+  .candidates-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+                     gap:14px; }
+  .post-card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+               overflow:hidden; cursor:pointer; transition:all .25s ease;
+               position:relative; text-decoration:none; color:var(--text); display:block; }
+  .post-card:hover { border-color:var(--accent); transform:translateY(-3px);
+                     box-shadow:0 8px 24px rgba(79,140,255,.12); }
+  .post-card:active { transform:translateY(-1px); }
+
+  .post-card .thumb { width:100%; aspect-ratio:16/9; background:#0d0f13;
+                      display:flex; align-items:center; justify-content:center;
+                      font-size:40px; color:var(--border); overflow:hidden;
+                      border-bottom:1px solid var(--border); position:relative; }
+  .post-card .thumb img { width:100%; height:100%; object-fit:cover; }
+  .post-card .thumb .placeholder-icon { font-size:36px; opacity:.5; }
+
+  .post-card .rank-badge { position:absolute; top:10px; left:10px; background:var(--accent);
+                           color:#fff; font-size:11px; font-weight:700; padding:3px 10px;
+                           border-radius:12px; z-index:2; }
+  .post-card .rank-badge.best { background:var(--ok); }
+
+  .post-card .sim-bar { position:absolute; bottom:0; left:0; right:0; height:4px;
+                        background:rgba(0,0,0,.5); }
+  .post-card .sim-bar-fill { height:100%; border-radius:0 2px 0 0; transition:width .4s; }
+
+  .post-card .card-body { padding:14px; }
+  .post-card .card-title { font-size:13px; font-weight:500; line-height:1.4;
+                           display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+                           overflow:hidden; margin-bottom:8px; min-height:36px; }
+  .post-card .card-meta { display:flex; align-items:center; justify-content:space-between;
+                          gap:8px; }
+  .post-card .platform { display:flex; align-items:center; gap:5px; font-size:12px;
+                         color:var(--muted); }
+  .post-card .platform .dot { width:6px; height:6px; border-radius:50%; }
+  .post-card .similarity { font-size:13px; font-weight:600; }
+  .post-card .similarity.high { color:var(--ok); }
+  .post-card .similarity.med { color:var(--warn); }
+  .post-card .similarity.low { color:var(--muted); }
+
+  .post-card .card-footer { padding:0 14px 12px; display:flex; gap:6px; flex-wrap:wrap; }
+  .post-card .tag { font-size:10px; padding:2px 8px; border-radius:10px;
+                    background:rgba(154,163,178,.1); color:var(--muted); }
+  .post-card .tag.match { background:rgba(46,204,113,.12); color:var(--ok); }
+
+  .post-card .open-hint { position:absolute; top:10px; right:10px; background:rgba(0,0,0,.6);
+                          color:#fff; font-size:10px; padding:4px 8px; border-radius:6px;
+                          opacity:0; transition:opacity .2s; pointer-events:none; }
+  .post-card:hover .open-hint { opacity:1; }
+
+  .no-results { text-align:center; padding:40px 20px; color:var(--muted); }
+  .no-results .big-icon { font-size:40px; margin-bottom:10px; opacity:.5; }
+  .error { color:#ff6b6b; }
+  .hidden { display:none !important; }
+  #spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border);
+             border-top-color:var(--accent); border-radius:50%;
+             animation:spin 1s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ===== Pipeline ===== */
+  .pipeline-wrap { background:var(--stage-bg); border:1px solid var(--border);
+                   border-radius:12px; padding:28px 20px 24px; margin-bottom:20px; }
+  .pipeline-wrap h2 { font-size:14px; font-weight:500; color:var(--muted);
+                      text-align:center; margin-bottom:16px; letter-spacing:.3px; }
+  .pipeline { display:flex; align-items:flex-start; justify-content:center; gap:0; }
+
+  .stage { display:flex; flex-direction:column; align-items:center; width:130px; position:relative; }
+  .stage-dot { width:44px; height:44px; border-radius:50%; display:flex; align-items:center;
+               justify-content:center; font-size:18px; position:relative; z-index:2;
+               transition: all .4s ease; border:2px solid var(--stage-wait); background:var(--panel); }
+  .stage-dot .icon { transition: all .3s; }
+  .stage-label { margin-top:10px; font-size:12px; font-weight:500; color:var(--muted);
+                 text-align:center; transition: color .3s; }
+  .stage-info { margin-top:4px; font-size:11px; color:var(--muted); text-align:center;
+                opacity:0; transition: opacity .3s; height:28px; }
+  .stage-info span { display:block; line-height:1.4; }
+
+  /* Connector line */
+  .connector { width:36px; height:2px; background:var(--stage-wait); margin-top:21px;
+               transition: background .4s; position:relative; flex-shrink:0; }
+  .connector::after { content:''; position:absolute; top:-3px; right:-4px;
+                      width:8px; height:8px; border-right:2px solid var(--stage-wait);
+                      border-top:2px solid var(--stage-wait); transform:rotate(45deg);
+                      transition: border-color .4s; }
+
+  /* States */
+  .stage.active .stage-dot { border-color:var(--stage-active); background:var(--stage-active);
+                             box-shadow:0 0 20px var(--pulse), 0 0 40px var(--pulse);
+                             animation:pulse-ring 2s ease-in-out infinite; }
+  .stage.active .stage-label { color:var(--text); }
+  .stage.active .stage-info { opacity:1; color:var(--text); }
+
+  .stage.done .stage-dot { border-color:var(--stage-done); background:rgba(46,204,113,.12); }
+  .stage.done .stage-label { color:var(--ok); }
+  .stage.done .stage-info { opacity:1; color:var(--muted); }
+
+  .connector.done { background:var(--ok); }
+  .connector.done::after { border-color:var(--ok); }
+  .connector.active { background:var(--stage-active); animation:flow .8s linear infinite; }
+  .connector.active::after { border-color:var(--stage-active); }
+
+  @keyframes pulse-ring {
+    0%,100% { box-shadow:0 0 12px var(--pulse); }
+    50% { box-shadow:0 0 24px var(--pulse), 0 0 48px rgba(79,140,255,.08); }
+  }
+  @keyframes flow {
+    0% { background:var(--stage-active); }
+    50% { background:rgba(79,140,255,.3); }
+    100% { background:var(--stage-active); }
+  }
+
+  /* Progress bar */
+  .progress-section { margin-top:20px; text-align:center; }
+  .progress-label { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .progress-bar { width:100%; height:6px; background:var(--border); border-radius:3px;
+                  overflow:hidden; }
+  .progress-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--ok));
+                   border-radius:3px; transition:width .6s ease; width:0%; }
+  .progress-pct { font-size:22px; font-weight:700; color:var(--text); margin-top:6px; }
+  .progress-pct span { font-size:13px; font-weight:400; color:var(--muted); }
+
+  /* Summary cards */
+  .summary-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:16px; }
+  .summary-card { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                  padding:12px 14px; text-align:center; }
+  .summary-card .label { font-size:11px; color:var(--muted); text-transform:uppercase;
+                         letter-spacing:.5px; margin-bottom:4px; }
+  .summary-card .value { font-size:20px; font-weight:700; color:var(--text); }
+  .summary-card .value.green { color:var(--ok); }
+  .summary-card .value.blue { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Face → Web → Blockchain</h1>
+  <div class="sub">Upload a face image. The pipeline reverse-searches the web,
+    matches your face against candidates (thumbnail + page-content evidence),
+    fingerprints the best match, and can attest it on-chain.</div>
+
+  <div class="panel">
+    <label for="file">Face image (JPEG / PNG / WebP, max 10&nbsp;MB)</label>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
+    <button id="uploadBtn">Run search</button>
+    <button class="ghost" id="verifyBtn" disabled>Verify on-chain</button>
+    <div class="status hidden" id="status"></div>
+  </div>
+
+  <!-- ===== Interactive Pipeline ===== -->
+  <div class="pipeline-wrap hidden" id="pipelineWrap">
+    <h2>Processing Pipeline</h2>
+    <div class="pipeline" id="pipeline">
+      <div class="stage" data-step="face">
+        <div class="stage-dot"><span class="icon">🔍</span></div>
+        <div class="stage-label">Face Detection</div>
+        <div class="stage-info" id="faceInfo"><span>Waiting…</span></div>
+      </div>
+      <div class="connector" id="conn1"></div>
+      <div class="stage" data-step="search">
+        <div class="stage-dot"><span class="icon">🌐</span></div>
+        <div class="stage-label">Visual Search</div>
+        <div class="stage-info" id="searchInfo"><span>Waiting…</span></div>
+      </div>
+      <div class="connector" id="conn2"></div>
+      <div class="stage" data-step="collect">
+        <div class="stage-dot"><span class="icon">📦</span></div>
+        <div class="stage-label">Candidate<br>Collection</div>
+        <div class="stage-info" id="collectInfo"><span>Waiting…</span></div>
+      </div>
+      <div class="connector" id="conn3"></div>
+      <div class="stage" data-step="match">
+        <div class="stage-dot"><span class="icon">🧬</span></div>
+        <div class="stage-label">Face Matching</div>
+        <div class="stage-info" id="matchInfo"><span>Waiting…</span></div>
+      </div>
+      <div class="connector" id="conn4"></div>
+      <div class="stage" data-step="chain">
+        <div class="stage-dot"><span class="icon">⛓️</span></div>
+        <div class="stage-label">Blockchain<br>Registry</div>
+        <div class="stage-info" id="chainInfo"><span>Waiting…</span></div>
+      </div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-label">Overall Progress</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-pct"><span id="progressNum">0</span><span>%</span></div>
+    </div>
+
+    <div class="summary-row" id="summaryCards">
+      <div class="summary-card"><div class="label">Face Found</div><div class="value" id="scFace">—</div></div>
+      <div class="summary-card"><div class="label">Matches</div><div class="value blue" id="scMatches">—</div></div>
+      <div class="summary-card"><div class="label">Status</div><div class="value green" id="scStatus">—</div></div>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="resultPanel">
+    <div class="result-header">
+      <h2>Results</h2>
+      <div class="result-stats">
+        <div class="stat-pill"><span class="num" id="statCandidates">0</span> candidates</div>
+        <div class="stat-pill"><span class="num" id="statMatches">0</span> matches</div>
+      </div>
+    </div>
+
+    <div class="kv" id="summary"></div>
+
+    <div id="bestMatchBanner" class="hidden"></div>
+
+    <div class="candidates-grid" id="candidatesGrid"></div>
+
+    <div id="blockchainInfo"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentJobId = null;
+
+/* ===== Pipeline State Machine ===== */
+const STAGES = ['face','search','collect','match','chain'];
+const STAGE_PROGRESS = { face:20, search:40, collect:60, match:80, chain:100 };
+
+function resetPipeline() {
+  STAGES.forEach(s => {
+    const el = $('pipeline').querySelector('[data-step="'+s+'"]');
+    el.className = 'stage';
+    el.querySelector('.icon').textContent = {face:'🔍',search:'🌐',collect:'📦',match:'🧬',chain:'⛓️'}[s];
+  });
+  for (let i = 1; i <= 4; i++) $('conn'+i).className = 'connector';
+  $('progressFill').style.width = '0%';
+  $('progressNum').textContent = '0';
+  $('scFace').textContent = '—';
+  $('scMatches').textContent = '—';
+  $('scStatus').textContent = '—';
+}
+
+function setStage(name, state, info) {
+  const el = $('pipeline').querySelector('[data-step="'+name+'"]');
+  el.className = 'stage ' + state;
+  if (info) $(''+name+'Info').innerHTML = '<span>'+info+'</span>';
+  if (state === 'done') el.querySelector('.icon').textContent = '✓';
+}
+
+function setConnector(index, state) {
+  $('conn'+index).className = 'connector ' + state;
+}
+
+function updateProgress(pct) {
+  $('progressFill').style.width = pct + '%';
+  $('progressNum').textContent = Math.round(pct);
+}
+
+/* Map backend status to pipeline stages */
+function animatePipeline(data) {
+  const status = data.status;
+  const faceOk = data.face_detected;
+  const hasMatches = data.candidates && data.candidates.length > 0;
+  const matchFound = data.match_found;
+
+  // Determine current active stage based on status
+  if (status === 'processing' || status === 'queued') {
+    // Show face detection as active or done
+    setStage('face','active','Detecting…');
+    updateProgress(5);
+  }
+  else if (status === 'face_detected') {
+    setStage('face','done', faceOk ? 'Face detected' : 'No face');
+    setConnector(1,'done');
+    setStage('search','active','Searching…');
+    updateProgress(STAGE_PROGRESS.face);
+    $('scFace').textContent = faceOk ? 'Yes' : 'No';
+  }
+  else if (status === 'searching' || status === 'visual_search') {
+    setStage('face','done', faceOk ? 'Face found' : 'No face');
+    setConnector(1,'done');
+    setStage('search','active','Searching web…');
+    updateProgress(STAGE_PROGRESS.face);
+    $('scFace').textContent = faceOk ? 'Yes' : 'No';
+  }
+  else if (status === 'collecting') {
+    setStage('face','done', 'Done');
+    setConnector(1,'done');
+    setStage('search','done','Done');
+    setConnector(2,'done');
+    setStage('collect','active','Fetching…');
+    updateProgress(STAGE_PROGRESS.search);
+    $('scFace').textContent = faceOk ? 'Yes' : 'No';
+  }
+  else if (status === 'matching') {
+    setStage('face','done','Done');
+    setConnector(1,'done');
+    setStage('search','done','Done');
+    setConnector(2,'done');
+    setStage('collect','done', (data.candidates_seen||0)+' found');
+    setConnector(3,'done');
+    setStage('match','active','Comparing…');
+    updateProgress(STAGE_PROGRESS.collect);
+    $('scFace').textContent = faceOk ? 'Yes' : 'No';
+    $('scMatches').textContent = data.candidates_seen || 0;
+  }
+  else if (status === 'complete') {
+    // All done
+    const totalTime = data.processing_time || 0;
+    STAGES.forEach((s,i) => {
+      setStage(s,'done', getDoneInfo(s,data));
+      if (i < 4) setConnector(i+1,'done');
+    });
+    updateProgress(100);
+    $('scFace').textContent = faceOk ? 'Yes' : 'No';
+    $('scMatches').textContent = data.candidates ? data.candidates.length : 0;
+    $('scStatus').textContent = matchFound ? 'Matched' : 'No match';
+  }
+  else if (status === 'failed') {
+    // Show up to last active stage
+    STAGES.forEach(s => setStage(s,'done','—'));
+    updateProgress(0);
+    $('scStatus').textContent = 'Failed';
+    $('scStatus').style.color = '#ff6b6b';
+  }
+  else {
+    // Unknown status - just show progress
+    updateProgress(10);
+    setStage('face','active', status);
+  }
+}
+
+function getDoneInfo(stage, data) {
+  switch(stage) {
+    case 'face': return data.face_detected ? 'Detected' : 'None';
+    case 'search': return (data.candidates_seen || data.candidates?.length || 0) + ' results';
+    case 'collect': return (data.candidates?.length || 0) + ' candidates';
+    case 'match': return data.match_found ? '1 match' : 'No match';
+    case 'chain': return data.blockchain ? 'Registered' : 'Skipped';
+  }
+  return 'Done';
+}
+
+/* ===== Upload & Poll ===== */
+$('file').addEventListener('change', () => {
+  $('verifyBtn').disabled = true;
+  $('resultPanel').classList.add('hidden');
+  $('status').classList.add('hidden');
+  $('pipelineWrap').classList.add('hidden');
+  resetPipeline();
+});
+
+$('uploadBtn').addEventListener('click', async () => {
+  const fileInput = $('file');
+  const file = fileInput.files[0];
+  if (!file) { setStatus('Choose an image first.', false); return; }
+  const st = $('status');
+  st.classList.remove('hidden');
+  $('pipelineWrap').classList.remove('hidden');
+  resetPipeline();
+  setStatus('Uploading…', true);
+  $('uploadBtn').disabled = true;
+
+  // Show initial pipeline state
+  setStage('face','active','Uploading…');
+  updateProgress(2);
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const resp = await fetch('/search', { method: 'POST', body: form });
+    if (resp.status === 415) { setStatus('Unsupported file type.', false); return; }
+    if (!resp.ok) { setStatus('Upload failed (' + resp.status + ').', false); return; }
+    const data = await resp.json();
+    currentJobId = data.job_id;
+    setStatus('Job ' + currentJobId + ' accepted — processing…', true);
+    setStage('face','done','Uploaded');
+    setConnector(1,'active');
+    setStage('search','active','Starting…');
+    updateProgress(10);
+    await poll(currentJobId);
+  } catch (err) {
+    setStatus('Error: ' + err.message, false);
+  } finally {
+    $('uploadBtn').disabled = false;
+  }
+});
+
+async function poll(jobId) {
+  for (let i = 0; i < 120; i++) {
+    await sleep(2000);
+    let data;
+    try {
+      const r = await fetch('/search/' + jobId);
+      data = await r.json();
+    } catch (err) {
+      setStatus('Polling error: ' + err.message, false);
+      return;
+    }
+
+    // Animate pipeline on each poll
+    animatePipeline(data);
+
+    if (data.status === 'complete' || data.status === 'failed') {
+      render(data);
+      return;
+    }
+    setStatus('Job ' + jobId + ' — ' + data.status + ' (' + (i + 1) + 's)…', true);
+  }
+  setStatus('Timed out waiting for job.', false);
+}
+
+function render(data) {
+  setStatus('');
+  $('status').classList.add('hidden');
+  $('resultPanel').classList.remove('hidden');
+
+  // Final pipeline state
+  animatePipeline(data);
+
+  const s = data.status === 'complete' ? '<span class="badge b-ok">complete</span>'
+           : '<span class="badge b-warn">' + data.status + '</span>';
+  $('summary').innerHTML =
+    kv('Job', '<code>' + data.job_id + '</code>') +
+    kv('Status', s) +
+    kv('Provider', data.provider || '—') +
+    kv('Face detected', data.face_detected ? 'yes' : 'no') +
+    kv('Face confidence', data.face_confidence ? data.face_confidence.toFixed(3) : '—');
+
+  if (data.error) $('summary').innerHTML += '<div class="error" style="grid-column:1/3">' + esc(data.error) + '</div>';
+
+  // Stats
+  const candidates = data.candidates || [];
+  const matchCount = candidates.filter(c => c.similarity >= 0.4).length;
+  $('statCandidates').textContent = candidates.length;
+  $('statMatches').textContent = matchCount;
+
+  // Best match banner
+  const banner = $('bestMatchBanner');
+  if (data.matched_post) {
+    const p = data.matched_post;
+    banner.classList.remove('hidden');
+    banner.innerHTML =
+      '<div class="best-match-banner">' +
+        '<div class="trophy">🏆</div>' +
+        '<div class="info">' +
+          '<h3>Best Match Found — ' + esc(p.platform) + '</h3>' +
+          '<p>Similarity: <b>' + p.similarity.toFixed(3) + '</b> · ' +
+          tierBadge(p.evidence_tier) + ' · ' +
+          '<a href="' + esc(p.url) + '" target="_blank" rel="noopener" ' +
+          'style="color:var(--accent);text-decoration:none;">' + esc(p.title || 'Open post →') + '</a></p>' +
+        '</div>' +
+      '</div>';
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  // Candidate cards
+  const grid = $('candidatesGrid');
+  grid.innerHTML = '';
+  if (candidates.length === 0) {
+    grid.innerHTML = '<div class="no-results"><div class="big-icon">🔍</div><p>No candidates found</p></div>';
+  } else {
+    candidates.forEach((c, idx) => {
+      const sim = c.similarity;
+      const simClass = sim >= 0.5 ? 'high' : sim >= 0.3 ? 'med' : 'low';
+      const simPct = Math.round(sim * 100);
+      const isBest = data.matched_post && c.url === data.matched_post.url;
+      const barColor = sim >= 0.5 ? 'var(--ok)' : sim >= 0.3 ? 'var(--warn)' : 'var(--muted)';
+      const platformColors = {
+        'instagram':'#E1306C','twitter':'#1DA1F2','facebook':'#1877F2',
+        'tiktok':'#010101','youtube':'#FF0000','linkedin':'#0A66C2',
+        'reddit':'#FF4500','pinterest':'#BD0816','unknown':'var(--border)'
+      };
+      const dotColor = platformColors[(c.platform||'').toLowerCase()] || platformColors.unknown;
+
+      const card = document.createElement('a');
+      card.href = esc(c.url);
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+      card.className = 'post-card';
+      card.innerHTML =
+        '<div class="thumb">' +
+          (c.image_url
+            ? '<img src="' + esc(c.image_url) + '" alt="thumbnail" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+            : '') +
+          '<div class="placeholder-icon" style="display:' + (c.image_url ? 'none' : 'flex') + '">📷</div>' +
+          '<div class="rank-badge' + (isBest ? ' best' : '') + '">' +
+            (isBest ? '🏆 #1' : '#' + (idx + 1)) +
+          '</div>' +
+          '<div class="open-hint">↗ Open original</div>' +
+          '<div class="sim-bar"><div class="sim-bar-fill" style="width:' + simPct + '%;background:' + barColor + '"></div></div>' +
+        '</div>' +
+        '<div class="card-body">' +
+          '<div class="card-title">' + esc(c.title || c.url || 'Untitled post') + '</div>' +
+          '<div class="card-meta">' +
+            '<div class="platform"><span class="dot" style="background:' + dotColor + '"></span>' + esc(c.platform || 'Unknown') + '</div>' +
+            '<div class="similarity ' + simClass + '">' + (sim * 100).toFixed(1) + '%</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card-footer">' +
+          tierBadge(c.evidence_tier) +
+          (isBest ? '<span class="tag match">Best match</span>' : '') +
+        '</div>';
+      grid.appendChild(card);
+    });
+  }
+
+  // Blockchain info
+  const bcDiv = $('blockchainInfo');
+  if (data.blockchain) {
+    const bc = data.blockchain;
+    bcDiv.innerHTML =
+      '<div class="card" style="margin-top:16px;border-color:rgba(79,140,255,.3);">' +
+        '<div class="row" style="margin-bottom:8px"><span style="font-weight:600">⛓️ Blockchain Record</span>' +
+        '<span>' + (bc.verified ? '<span class="badge b-ok">verified</span>' : '<span class="badge b-warn">not stored</span>') + '</span></div>' +
+        '<div class="row muted" style="font-size:12px;margin-bottom:4px"><span>Content hash</span><code>' + bc.content_hash + '</code></div>' +
+        '<div class="row muted" style="font-size:12px"><span>Tx hash</span><code>' + (bc.tx_hash || '—') + '</code></div>' +
+      '</div>';
+  } else {
+    bcDiv.innerHTML = '';
+  }
+
+  $('verifyBtn').disabled = !currentJobId;
+}
+
+$('verifyBtn').addEventListener('click', async () => {
+  if (!currentJobId) return;
+  setStatus('Verifying…', true);
+  $('status').classList.remove('hidden');
+  try {
+    const r = await fetch('/search/' + currentJobId + '/verify');
+    const v = await r.json();
+    setStatus('On-chain: ' + (v.on_chain ? 'registered ✓' : 'not registered') +
+              (v.error ? ' — ' + v.error : ''), false);
+  } catch (err) {
+    setStatus('Verify error: ' + err.message, false);
+  }
+});
+
+function kv(k, v) { return '<b>' + esc(k) + '</b><span>' + v + '</span>'; }
+function tierBadge(t) {
+  if (t === 'verified') return '<span class="badge b-ok">verified</span>';
+  if (t === 'thumbnail') return '<span class="badge b-warn">thumbnail</span>';
+  return '<span class="badge b-mute">' + (t || 'none') + '</span>';
+}
+function setStatus(text, spinner) {
+  $('status').innerHTML = (spinner ? '<span id="spinner"></span>' : '') + esc(text);
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
