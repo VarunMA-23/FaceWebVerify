@@ -49,6 +49,7 @@ class FaceModel:
             name=self.model_name,
             root=_MODEL_ROOT,
             providers=providers,
+            allowed_modules=["detection", "recognition"],
         )
 
     def prepare(self) -> None:

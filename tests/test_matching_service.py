@@ -11,11 +11,55 @@ from mock_server import ServerScope  # noqa: E402
 
 from backend.face.embedder import embed_face  # noqa: E402
 from backend.face.matcher import EvidenceTier, best_of, match_image_to_embedding  # noqa: E402
-from backend.matching.service import MatcherService, match_reference_to_search_results  # noqa: E402
+from backend.matching.service import (  # noqa: E402
+    MatcherService,
+    adapt_candidate_limit,
+    match_reference_to_search_results,
+)
 from backend.search.search_models import SearchResult  # noqa: E402
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 LENA = os.path.join(FIXTURES, "lena.jpg")
+
+
+# ------------------------------------------------------------------ adaptive RAM fallback
+
+
+def test_adapt_candidate_limit_never_grows_or_goes_negative():
+    for req in range(0, 11):
+        out = adapt_candidate_limit(req)
+        assert 0 <= out <= max(req, 0)
+
+
+def test_adapt_candidate_limit_returns_adjusted_when_ram_low(monkeypatch):
+    from backend import matching
+
+    original = matching.service._available_ram_mib
+
+    def fake(avail):
+        def _fake():
+            return avail
+        return _fake
+
+    try:
+        # 300 MiB -> very tight, at most 2 candidates
+        monkeypatch.setattr(matching.service, "_available_ram_mib", fake(300))
+        assert adapt_candidate_limit(5) == 2
+        assert adapt_candidate_limit(1) == 1
+
+        # 700 MiB -> tight, at most 3 candidates
+        monkeypatch.setattr(matching.service, "_available_ram_mib", fake(700))
+        assert adapt_candidate_limit(5) == 3
+
+        # plenty of RAM -> unchanged
+        monkeypatch.setattr(matching.service, "_available_ram_mib", fake(16384))
+        assert adapt_candidate_limit(5) == 5
+
+        # unknown RAM -> unchanged
+        monkeypatch.setattr(matching.service, "_available_ram_mib", fake(-1))
+        assert adapt_candidate_limit(5) == 5
+    finally:
+        matching.service._available_ram_mib = original
 
 
 # ------------------------------------------------------------------ unit
@@ -124,3 +168,39 @@ def test_page_path_produces_verified_match():
         assert ev.page_match.is_match is True
         assert ev.tier == EvidenceTier.VERIFIED
         assert ev.score > 0.4
+
+
+@pytest.mark.skipif(not os.path.exists(LENA), reason="Lena fixture missing")
+def test_match_candidates_parallel_returns_results_in_input_order():
+    """Concurrent matching returns one CandidateEvidence per input, in order."""
+    with ServerScope() as s:
+        with open(LENA, "rb") as fh:
+            lena_bytes = fh.read()
+        # Two open posts with the same content image -> both should match.
+        for n in (1, 2):
+            s.router.add(
+                f"/post{n}",
+                f'<title>Post {n}</title><meta property="og:image" content="/content{n}.jpg">',
+            )
+            s.router.add(f"/content{n}.jpg", lena_bytes, content_type="image/jpeg")
+        # A third candidate whose page is a plain page (no image) -> no match.
+        s.router.add("/post3", "<title>No image here</title><p>text only</p>")
+
+        ref = embed_face(LENA)
+        assert ref and ref.embedding is not None
+
+        results = [
+            SearchResult(url=s.url("/post1"), image_url=""),
+            SearchResult(url=s.url("/post2"), image_url=""),
+            SearchResult(url=s.url("/post3"), image_url=""),
+        ]
+        with MatcherService() as service:
+            evid = service.match_candidates(ref.embedding, results)
+
+        # One result per input, in the original order.
+        assert len(evid) == 3
+        assert [e.page_url for e in evid] == [r.url for r in results]
+        # First two matched (verified), third did not.
+        assert evid[0].is_match is True and evid[0].tier == EvidenceTier.VERIFIED
+        assert evid[1].is_match is True and evid[1].tier == EvidenceTier.VERIFIED
+        assert evid[2].is_match is False

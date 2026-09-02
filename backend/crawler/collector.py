@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -71,16 +72,19 @@ class Collector:
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self._tmpdir: str | None = None
+        self._lock = threading.Lock()
 
     def _storage(self) -> str:
-        if self._tmpdir is None:
-            self._tmpdir = tempfile.mkdtemp(prefix="hhgoa_")
-        return self._tmpdir
+        with self._lock:
+            if self._tmpdir is None:
+                self._tmpdir = tempfile.mkdtemp(prefix="hhgoa_")
+            return self._tmpdir
 
     def cleanup(self) -> None:
-        if self._tmpdir and os.path.isdir(self._tmpdir):
-            shutil.rmtree(self._tmpdir, ignore_errors=True)
-            self._tmpdir = None
+        with self._lock:
+            if self._tmpdir and os.path.isdir(self._tmpdir):
+                shutil.rmtree(self._tmpdir, ignore_errors=True)
+                self._tmpdir = None
 
     def __enter__(self) -> "Collector":
         return self
@@ -183,8 +187,14 @@ class Collector:
             ext = _guess_ext(content_type, img_url)
             digest = hashlib.sha256(data).hexdigest()[:16]
             local_path = os.path.join(storage, f"{digest}{ext}")
-            with open(local_path, "wb") as fh:
-                fh.write(data)
+            # Write atomically so concurrent threads never observe a
+            # partially-written image (digest names are content-addressed, so
+            # two threads downloading the same bytes produce the same file).
+            if not os.path.exists(local_path):
+                tmp = os.path.join(storage, f".{digest}{ext}.part")
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                os.replace(tmp, local_path)
             return local_path
         except requests.RequestException:
             return ""

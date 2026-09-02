@@ -14,6 +14,7 @@ evidence source that produced a match (verified > thumbnail > none).
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from backend.crawler.collector import Collector
 from backend.face.embedder import embed_face
@@ -24,6 +25,74 @@ from backend.face.matcher import (
     best_of,
     match_image_to_embedding,
 )
+
+#: Upper bound on how many candidate-image matches may run concurrently.
+#: Kept modest so inference + downloads never oversubscribe a low-core CPU.
+MAX_WORKERS = 8
+
+#: Minimum available RAM (MiB) below which we still allow parallelism.
+#: Below this, fall back to sequential processing to stay smooth on
+#: very memory-constrained laptops.
+LOW_RAM_MIB = 1024
+
+
+def _available_ram_mib() -> int:
+    """Best-effort estimate of currently available system RAM in MiB.
+
+    Returns -1 when the platform cannot be determined (treated as unlimited).
+    """
+    try:
+        # python 3.13
+        import psutil
+
+        return int(psutil.virtual_memory().available // (1024 * 1024))
+    except Exception:  # noqa: BLE001
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) // 1024
+        except Exception:  # noqa: BLE001
+            try:
+                import ctypes
+
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+                return int(stat.ullAvailPhys // (1024 * 1024))
+            except Exception:  # noqa: BLE001
+                return -1
+
+
+def adapt_candidate_limit(requested: int) -> int:
+    """Reduce the candidate count when the machine has little free RAM.
+
+    On constrained machines we process fewer candidates (still in parallel)
+    so the pipeline stays responsive and does not thrash memory.
+    """
+    if requested <= 1:
+        return requested
+    avail = _available_ram_mib()
+    if avail < 0:  # unknown -> leave unchanged
+        return requested
+    if avail < 512:  # very tight: only a few candidates
+        return max(1, min(requested, 2))
+    if avail < LOW_RAM_MIB:  # tight: about half the candidates
+        return max(1, min(requested, 3))
+    return requested
 
 
 class CandidateEvidence:
@@ -154,6 +223,38 @@ class MatcherService:
         except Exception:  # noqa: BLE001
             return None
 
+    def _match_one(
+        self,
+        reference_embedding: object,
+        candidate: object,
+        index: int,
+    ) -> None:
+        """Match a single candidate (thumbnail + page) and store the result.
+
+        Called from a worker thread; the per-candidate ``CandidateEvidence``
+        object is shared across threads only for its own slice of state, so
+        there is no cross-candidate race.
+        """
+        url = getattr(candidate, "url", "")
+        ev = CandidateEvidence(
+            page_url=url,
+            image_url=getattr(candidate, "image_url", ""),
+            platform=getattr(candidate, "source", "web"),
+            title=getattr(candidate, "title", ""),
+        )
+        self.evidence_cache[url] = ev
+
+        # PATH A: thumbnail first (works for login-walled posts).
+        ev.thumbnail_match = self._match_thumbnail(
+            reference_embedding, ev.image_url, url, ev.platform
+        )
+        # PATH B: real page content.
+        ev.page_match = self._match_page(
+            reference_embedding, url, ev.image_url, ev.platform
+        )
+        ev.combine(reference_embedding, self.threshold)
+        self._results[index] = ev
+
     def match_candidates(
         self,
         reference_embedding: object,
@@ -163,31 +264,35 @@ class MatcherService:
 
         ``candidates`` items must have ``.url`` and ``.image_url`` attributes
         (e.g. :class:`SearchResult`).
+
+        Candidates are matched concurrently with a bounded thread pool. On
+        machines with little free RAM the pool is sized down (and on very
+        constrained systems the candidate count itself is reduced) so the
+        pipeline stays responsive on low-RAM laptops.
         """
         self.evidence_cache: dict[str, CandidateEvidence] = {}
-        results: list[CandidateEvidence] = []
 
-        for sr in candidates:
-            ev = CandidateEvidence(
-                page_url=sr.url,
-                image_url=getattr(sr, "image_url", ""),
-                platform=getattr(sr, "source", "web"),
-                title=getattr(sr, "title", ""),
-            )
-            self.evidence_cache[sr.url] = ev
-            results.append(ev)
+        # Keep the original order in the returned list regardless of how
+        # quickly individual candidates finish.
+        self._results: list[CandidateEvidence] = [None] * len(candidates)  # type: ignore[list-item]
+        candidates = candidates[: adapt_candidate_limit(len(candidates))]
 
-            # PATH A: thumbnail first (works for login-walled posts).
-            ev.thumbnail_match = self._match_thumbnail(
-                reference_embedding, ev.image_url, sr.url, ev.platform
-            )
-            # PATH B: real page content.
-            ev.page_match = self._match_page(
-                reference_embedding, sr.url, ev.image_url, ev.platform
-            )
-            ev.combine(reference_embedding, self.threshold)
+        workers = max(1, min(MAX_WORKERS, len(candidates)))
+        if workers == 1:
+            for i, sr in enumerate(candidates):
+                self._match_one(reference_embedding, sr, i)
+            return self._results
 
-        return results
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(self._match_one, reference_embedding, sr, i)
+                for i, sr in enumerate(candidates)
+            ]
+            for f in futures:
+                f.result()
+
+        # Trim back to the actual size (adapt_candidate_limit may have reduced it).
+        return [r for r in self._results if r is not None]
 
 
 def match_reference_to_search_results(
