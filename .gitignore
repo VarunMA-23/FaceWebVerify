@@ -17,6 +17,9 @@ uploads/
 data/
 *.onnx
 
+# Models (large binary files, use Git LFS or download separately)
+models/
+
 # Test / coverage
 .pytest_cache/
 .coverage
@@ -29,6 +32,3 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
-
-#models
-models/*
