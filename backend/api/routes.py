@@ -1,26 +1,40 @@
-"""HTTP routes: POST /search, GET /search/{id}, GET /search/{id}/verify."""
+"""HTTP routes for EvidenceChain investigation API."""
 
 from __future__ import annotations
 
+import json
+import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from backend.api.schemas import (
     BlockchainSummary,
+    EvidencePassportModel,
+    IntegrityResponseModel,
     PostSummary,
     SearchResponseModel,
+    SearchSummary,
+    TimelineStep,
     VerifyResponseModel,
 )
+from backend.evidence.source import (
+    evidence_tier_label,
+    extract_social_handle,
+    normalize_platform,
+    platform_display_name,
+)
+from backend.blockchain.integrity import verify_integrity
+from backend.blockchain.verifier import verify_on_blockchain
 from backend.database.models import Database
+from backend.fingerprint.canonicalizer import EvidenceRecord
+from backend.fingerprint.hasher import fingerprint
 from backend.pipeline.runner import PipelineRunner
 
 router = APIRouter(prefix="/search", tags=["search"])
 
-#: Max upload size in bytes (10 MB per the spec).
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
@@ -32,13 +46,71 @@ class JobAccepted(BaseModel):
     status: str = "processing"
 
 
-def _runner(db: Database | None = None) -> PipelineRunner:
-    return PipelineRunner(db or Database(), do_blockchain=False)
+def _runner(db: Database | None = None, limit: int = 5, threshold: float = 0.4) -> PipelineRunner:
+    do_bc = os.environ.get("DO_BLOCKCHAIN", "auto").lower()
+    enable = do_bc in ("1", "true", "yes")
+    if do_bc == "auto":
+        enable = bool(
+            os.environ.get("SEPOLIA_WALLET_PRIVATE_KEY", "").strip()
+            and os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "").strip()
+        )
+    return PipelineRunner(db or Database(), limit=limit, threshold=threshold, do_blockchain=enable)
 
 
 def get_db() -> Database:
-    """FastAPI dependency: a fresh Database connection per request."""
     return Database()
+
+
+def _post_from_row(p: dict, threshold: float = 0.4) -> PostSummary:
+    meta = {}
+    raw_meta = p.get("metadata_json") or ""
+    if raw_meta:
+        try:
+            meta = json.loads(raw_meta)
+        except json.JSONDecodeError:
+            meta = {}
+    providers = []
+    raw_prov = p.get("providers_json") or ""
+    if raw_prov:
+        try:
+            providers = json.loads(raw_prov)
+        except json.JSONDecodeError:
+            providers = []
+    explanation = []
+    raw_exp = p.get("explanation_json") or ""
+    if raw_exp:
+        try:
+            explanation = json.loads(raw_exp)
+        except json.JSONDecodeError:
+            explanation = []
+    sim = float(p.get("face_similarity") or 0)
+    tier = p.get("evidence_tier") or ""
+    platform = normalize_platform(p.get("platform") or "", p.get("post_url") or "")
+    source_type = p.get("source_type") or ""
+    url = p.get("post_url") or ""
+    handle = meta.get("social_handle") or extract_social_handle(url, platform) or ""
+    return PostSummary(
+        url=url,
+        image_url=p.get("image_url") or "",
+        platform=platform_display_name(platform) if platform not in ("web", "") else (p.get("platform") or ""),
+        domain=p.get("domain") or "",
+        source_type=source_type,
+        title=p.get("title") or "",
+        caption=p.get("caption") or "",
+        similarity=sim,
+        image_similarity=meta.get("image_similarity"),
+        evidence_tier=tier,
+        evidence_tier_label=evidence_tier_label(tier, source_type),
+        evidence_score=int(p.get("evidence_score") or 0),
+        score_breakdown=meta.get("score_breakdown") or {},
+        provider_count=int(p.get("provider_count") or 0),
+        providers=providers,
+        provider_consensus=meta.get("provider_consensus") or "",
+        social_handle=handle,
+        explanation=explanation,
+        matched=sim >= threshold and tier in ("verified", "thumbnail") and bool(url),
+        rank=int(meta.get("rank") or 0),
+    )
 
 
 @router.post("", response_model=JobAccepted)
@@ -47,12 +119,6 @@ async def create_search(
     limit: int = 5,
     threshold: float = 0.4,
 ) -> JobAccepted:
-    """Upload a face image and start a reverse-image search pipeline.
-
-    Validates the upload (Module 1), returns the ``job_id`` immediately, and
-    runs the pipeline in the background. Poll ``GET /search/{job_id}`` for
-    the result.
-    """
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=415,
@@ -66,10 +132,8 @@ async def create_search(
 
     job_id = uuid.uuid4().hex
     db = Database()
-    # Pre-create the job row so GET /search/{id} finds it immediately, even
-    # before the background worker starts running the pipeline.
     db.create_job(job_id, f"pending:{file.filename or 'upload.jpg'}")
-    runner = _runner(db)
+    runner = _runner(db, limit=limit, threshold=threshold)
     _executor.submit(_run_job, runner, db, job_id, data, file.filename, limit, threshold)
     return JobAccepted(job_id=job_id, status="processing")
 
@@ -84,32 +148,31 @@ def _run_job(
     threshold: float,
 ) -> None:
     try:
+        runner.limit = limit
+        runner.threshold = threshold
         runner.run(data, filename or "upload.jpg", job_id=job_id)
-    except Exception:  # noqa: BLE001 - keep worker threads from crashing
+    except Exception:  # noqa: BLE001
         db.update_job_status(job_id, "failed")
 
 
 @router.get("/{job_id}", response_model=SearchResponseModel)
 def get_search(job_id: str, db: Database = Depends(get_db)) -> SearchResponseModel:
-    """Fetch the current status and result for a job."""
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
 
+    meta = db.get_job_metadata(job_id)
     posts = db.get_posts(job_id)
-    candidates = [
-        PostSummary(
-            url=p["post_url"],
-            image_url=p["image_url"],
-            platform=p["platform"],
-            title=p["title"],
-            caption=p["caption"],
-            similarity=p["face_similarity"],
-            evidence_tier=p["evidence_tier"],
-            matched=p["face_similarity"] >= 0.4 and bool(p["post_url"]),
-        )
-        for p in posts
-    ]
+    candidates = [_post_from_row(p) for p in posts]
+    candidates.sort(
+        key=lambda c: (
+            c.matched,
+            c.evidence_tier == "verified",
+            c.similarity,
+            c.evidence_score,
+        ),
+        reverse=True,
+    )
 
     matched = [c for c in candidates if c.matched]
     matched_post = matched[0] if matched else None
@@ -117,28 +180,56 @@ def get_search(job_id: str, db: Database = Depends(get_db)) -> SearchResponseMod
     bc = db.get_blockchain_record(job_id)
     blockchain = None
     if bc:
+        on_chain = False
+        try:
+            on_chain = verify_on_blockchain(bc["content_hash"])
+        except (ValueError, ConnectionError):
+            on_chain = False
         blockchain = BlockchainSummary(
             content_hash=bc["content_hash"],
             tx_hash=bc["transaction_hash"],
             block_number=bc["block_number"],
-            verified=bool(bc["transaction_hash"]),
+            verified=on_chain,
         )
+
+    passport_data = meta.get("passport") or {}
+    if passport_data:
+        plat = normalize_platform(passport_data.get("source_platform") or "")
+        url = passport_data.get("source_url") or ""
+        passport_data = dict(passport_data)
+        passport_data["social_handle"] = passport_data.get("social_handle") or extract_social_handle(url, plat) or ""
+        passport_data["evidence_tier_label"] = evidence_tier_label(
+            passport_data.get("evidence_tier") or "",
+            passport_data.get("source_type") or "",
+        )
+    passport = EvidencePassportModel(**passport_data) if passport_data else None
+    summary_data = meta.get("summary") or {}
+    summary = SearchSummary(**summary_data) if summary_data else None
+    timeline = [TimelineStep(**t) for t in meta.get("timeline") or []]
 
     return SearchResponseModel(
         job_id=job_id,
         status=job["status"],
-        face_detected=True,
+        provider=meta.get("provider") or "",
+        providers_used=meta.get("providers_used") or [],
+        providers_available=int(meta.get("providers_available") or 0),
+        provider_errors=meta.get("provider_errors") or {},
+        face_detected=bool(meta.get("face_confidence") or job["status"] != "failed"),
+        face_confidence=float(meta.get("face_confidence") or 0),
         candidates_seen=len(candidates),
         match_found=bool(matched_post),
         matched_post=matched_post,
+        passport=passport,
+        summary=summary,
+        timeline=timeline,
         blockchain=blockchain,
+        error=meta.get("error") or None,
         candidates=candidates,
     )
 
 
 @router.get("/{job_id}/verify", response_model=VerifyResponseModel)
 def verify_search(job_id: str, db: Database = Depends(get_db)) -> VerifyResponseModel:
-    """Verify the on-chain registration for a job."""
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -154,17 +245,88 @@ def verify_search(job_id: str, db: Database = Depends(get_db)) -> VerifyResponse
         )
 
     try:
-        from backend.blockchain.verifier import verify_on_blockchain
-
         on_chain = verify_on_blockchain(bc["content_hash"])
     except (ValueError, ConnectionError):
         on_chain = False
 
     return VerifyResponseModel(
         job_id=job_id,
-        verified=bool(bc["transaction_hash"]),
+        verified=bool(bc["transaction_hash"]) and on_chain,
         on_chain=on_chain,
         hash_matches=on_chain,
         content_hash=bc["content_hash"],
         tx_hash=bc["transaction_hash"],
     )
+
+
+@router.get("/{job_id}/integrity", response_model=IntegrityResponseModel)
+def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> IntegrityResponseModel:
+    """Re-verify integrity: compare attested hash vs current evidence record."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    meta = db.get_job_metadata(job_id)
+    passport = meta.get("passport") or {}
+    bc = db.get_blockchain_record(job_id)
+    attested = (bc or {}).get("content_hash") or passport.get("content_hash") or ""
+
+    on_chain = False
+    if attested:
+        try:
+            on_chain = verify_on_blockchain(attested)
+        except (ValueError, ConnectionError):
+            on_chain = False
+
+    # Recompute from stored canonical JSON if available
+    canonical_json = passport.get("canonical_json") or ""
+    current_hash = ""
+    if canonical_json:
+        from backend.fingerprint.hasher import fingerprint_from_canonical_json
+        current_hash = fingerprint_from_canonical_json(canonical_json)
+    elif passport:
+        record = EvidenceRecord(
+            evidence_id=passport.get("evidence_id", ""),
+            source_url=passport.get("source_url", ""),
+            canonical_url=passport.get("canonical_url", ""),
+            platform=passport.get("source_platform", ""),
+            source_type=passport.get("source_type", ""),
+            discovered_at=passport.get("discovered_at", ""),
+            face_similarity=float(passport.get("face_similarity") or 0),
+            image_similarity=passport.get("image_similarity"),
+            evidence_tier=passport.get("evidence_tier", ""),
+            providers=passport.get("providers") or [],
+            provider_consensus=passport.get("provider_consensus", ""),
+            evidence_score=int(passport.get("evidence_score") or 0),
+            verification_reasons=passport.get("verification_reasons") or [],
+        )
+        current_hash = fingerprint(record)
+
+    result = verify_integrity(attested, current_hash, on_chain)
+    return IntegrityResponseModel(job_id=job_id, **result)
+
+
+@router.get("/{job_id}/export")
+def export_evidence(job_id: str, db: Database = Depends(get_db)) -> dict:
+    """Export Evidence Passport as JSON (no biometric data)."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    meta = db.get_job_metadata(job_id)
+    passport = meta.get("passport") or {}
+    if not passport:
+        raise HTTPException(status_code=404, detail="No evidence passport for this job.")
+    export = {k: v for k, v in passport.items() if k not in ("canonical_json",)}
+    export["schema_version"] = "1.0"
+    export["exported_at"] = __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ).isoformat()
+    bc = db.get_blockchain_record(job_id)
+    if bc:
+        export["blockchain"] = {
+            "content_hash": bc.get("content_hash"),
+            "transaction_hash": bc.get("transaction_hash"),
+            "block_number": bc.get("block_number"),
+            "network": "Ethereum Sepolia",
+        }
+    return export

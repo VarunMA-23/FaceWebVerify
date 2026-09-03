@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+load_dotenv()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -46,9 +49,14 @@ def health() -> dict:
     return {"service": "Face-Web-Blockchain Pipeline", "status": "ok"}
 
 
-# Serve the static frontend (index.html) last so non-API paths fall through.
+# Serve the static frontend when SERVE_FRONTEND is enabled (single-port mode).
+_SERVE_FRONTEND = os.environ.get("SERVE_FRONTEND", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 _FRONTEND_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend"
 )
-if os.path.isdir(_FRONTEND_DIR):
+if _SERVE_FRONTEND and os.path.isdir(_FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")

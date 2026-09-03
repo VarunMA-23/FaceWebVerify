@@ -194,7 +194,12 @@ class Collector:
                 tmp = os.path.join(storage, f".{digest}{ext}.part")
                 with open(tmp, "wb") as fh:
                     fh.write(data)
-                os.replace(tmp, local_path)
+                try:
+                    os.replace(tmp, local_path)
+                except FileNotFoundError:
+                    # Another thread may have written the same content-addressed file.
+                    if not os.path.exists(local_path):
+                        raise
             return local_path
         except requests.RequestException:
             return ""

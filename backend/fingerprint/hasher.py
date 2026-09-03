@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Union
 
-from backend.fingerprint.canonicalizer import ContentRecord
+from backend.fingerprint.canonicalizer import ContentRecord, EvidenceRecord
 
 
-def fingerprint(record: ContentRecord) -> str:
-    """Compute the tamper-evident SHA-256 hash of a content record."""
+def fingerprint(record: Union[ContentRecord, EvidenceRecord]) -> str:
+    """Compute the tamper-evident SHA-256 hash of a content/evidence record."""
     canonical = record.canonical_json()
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

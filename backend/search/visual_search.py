@@ -209,34 +209,45 @@ PROVIDERS = [
 
 
 def search_web(image_path: str, provider: str = "auto") -> SearchResponse:
-    """Search the web for matching posts using the configured provider(s).
+    """Search the web for matching posts using configured provider(s).
 
-    Args:
-        image_path: local path of the query image.
-        provider: "auto" (first configured provider), "bing", "serpapi",
-            "tineye". If the named provider is not configured, falls through
-            to the next configured provider.
-
-    Returns:
-        SearchResponse with aggregated results and provider info.
+    When ``provider`` is ``auto`` and multiple providers are configured,
+    runs all providers in parallel and aggregates/deduplicates results.
+    With a single provider, runs that provider only.
     """
-    if provider == "auto":
-        candidates = PROVIDERS
-    else:
+    from backend.evidence.consensus import search_all_providers, to_search_results
+
+    if provider != "auto":
         named = next((p for p in PROVIDERS if p.name == provider), None)
         candidates = [named, *_other(named)] if named else PROVIDERS
+        for prov in candidates:
+            if not prov.available():
+                continue
+            resp = prov.search(image_path)
+            if resp.has_results:
+                return resp
+        errors = [p.name for p in candidates if p.configured]
+        return SearchResponse(
+            provider=",".join(errors),
+            error="No configured provider returned results",
+        )
 
-    for prov in candidates:
-        if not prov.available():
-            continue
-        resp = prov.search(image_path)
-        if resp.has_results:
-            return resp
-        # Try next provider on total failure.
-    errors = [p.name for p in candidates if p.configured]
+    aggregated = search_all_providers(image_path)
+    if not aggregated.has_results:
+        return SearchResponse(
+            provider=aggregated.provider,
+            error=aggregated.error or "No search results returned.",
+            providers_used=aggregated.providers_used,
+            providers_available=aggregated.providers_available,
+            provider_errors=aggregated.provider_errors,
+        )
+
     return SearchResponse(
-        provider=",".join(errors),
-        error="No configured provider returned results",
+        results=to_search_results(aggregated),
+        provider=aggregated.provider,
+        providers_used=aggregated.providers_used,
+        providers_available=aggregated.providers_available,
+        provider_errors=aggregated.provider_errors,
     )
 
 

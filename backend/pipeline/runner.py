@@ -1,45 +1,58 @@
-"""End-to-end pipeline runner shared by the CLI and the API.
-
-Given an input face image, runs:
-    face detect -> reverse search -> tiered match -> fingerprint ->
-    (optional) blockchain register
-
-and persists the outcome to the database. This is the single orchestrator
-used by both ``run_pipeline.py`` and the FastAPI layer so behaviour stays
-consistent.
-"""
+"""End-to-end pipeline runner shared by the CLI and the API."""
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from backend.evidence.explain import build_explanation
+from backend.evidence.models import ScoredCandidate
+from backend.evidence.passport import build_passport
+from backend.evidence.scorer import build_provider_consensus, compute_evidence_score
+from backend.evidence.source import build_source_info, extract_social_handle, is_social_source
+from backend.evidence.timeline import TimelineTracker
 from backend.face.embedder import embed_face
-from backend.search.visual_search import search_web
-from backend.matching.service import MatcherService, CandidateEvidence
-from backend.fingerprint.canonicalizer import ContentRecord, image_sha256_from_file
+from backend.fingerprint.canonicalizer import EvidenceRecord, image_sha256_from_file
 from backend.fingerprint.hasher import fingerprint
+from backend.matching.service import MatcherService, CandidateEvidence
+from backend.search.visual_search import search_web
 
 
 @dataclass
 class MatchEvidence:
-    """A single discovered candidate, whether or not it matched."""
+    """A single discovered candidate enriched with evidence metadata."""
 
     page_url: str
-    image_url: str
+    image_url: str = ""
     platform: str = ""
+    source_type: str = ""
+    domain: str = ""
+    canonical_url: str = ""
     title: str = ""
     caption: str = ""
     score: float = 0.0
     evidence_tier: str = ""
+    evidence_score: int = 0
+    score_breakdown: dict = field(default_factory=dict)
     is_match: bool = False
     content_hash: str = ""
     image_sha256: str = ""
+    image_similarity: float | None = None
     matched_image_url: str = ""
     local_image_path: str = ""
+    providers: list[str] = field(default_factory=list)
+    provider_count: int = 0
+    provider_consensus: str = ""
+    providers_available: int = 0
+    explanation: list[str] = field(default_factory=list)
+    page_retrieved: bool = False
+    image_retrieved: bool = False
+    rank: int = 0
 
 
 @dataclass
@@ -49,12 +62,27 @@ class PipelineResult:
     job_id: str = ""
     status: str = "processing"
     provider: str = ""
+    providers_used: list[str] = field(default_factory=list)
+    providers_available: int = 0
+    provider_errors: dict = field(default_factory=dict)
     face_detected: bool = False
     face_confidence: float = 0.0
     candidates_seen: int = 0
     best: MatchEvidence | None = None
+    passport: dict = field(default_factory=dict)
+    timeline: list = field(default_factory=list)
+    summary: dict = field(default_factory=dict)
     blockchain: dict = field(default_factory=dict)
     error: str = ""
+
+
+def _blockchain_enabled(explicit: bool) -> bool:
+    if explicit:
+        return True
+    return bool(
+        os.environ.get("SEPOLIA_WALLET_PRIVATE_KEY", "").strip()
+        and os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "").strip()
+    )
 
 
 class PipelineRunner:
@@ -73,10 +101,37 @@ class PipelineRunner:
         self.limit = limit
         self.threshold = threshold
         self.evidence_tier = evidence_tier
-        self.do_blockchain = do_blockchain
+        self.do_blockchain = _blockchain_enabled(do_blockchain)
         self.temp_dir = temp_dir
 
-    # ------------------------------------------------------------ public
+    def _sync_progress(
+        self,
+        job_id: str,
+        timeline: TimelineTracker,
+        result: PipelineResult,
+        *,
+        phase: str = "processing",
+    ) -> None:
+        """Persist timeline + partial results so the UI can poll live progress."""
+        result.timeline = timeline.to_list()
+        self.db.update_job_metadata(
+            job_id,
+            {
+                "timeline": result.timeline,
+                "phase": phase,
+                "summary": result.summary,
+                "passport": result.passport,
+                "providers_used": result.providers_used,
+                "providers_available": result.providers_available,
+                "provider_errors": result.provider_errors,
+                "provider": result.provider,
+                "face_confidence": result.face_confidence,
+                "face_detected": result.face_detected,
+                "candidates_seen": result.candidates_seen,
+                "error": result.error,
+            },
+        )
+
     def run(
         self,
         image_data: bytes,
@@ -89,19 +144,32 @@ class PipelineRunner:
         self.db.create_job(job_id, saved)
 
         result = PipelineResult(job_id=job_id, status="processing")
+        timeline = TimelineTracker()
         try:
-            self._execute(job_id, saved, result)
-            result.status = "complete"
-            self.db.update_job_status(job_id, "complete")
+            self._execute(job_id, saved, result, timeline)
         except Exception as exc:  # noqa: BLE001
             result.status = "failed"
             result.error = str(exc)
             self.db.update_job_status(job_id, "failed")
         finally:
+            result.timeline = timeline.to_list()
+            self.db.update_job_metadata(
+                job_id,
+                {
+                    "timeline": result.timeline,
+                    "summary": result.summary,
+                    "passport": result.passport,
+                    "providers_used": result.providers_used,
+                    "providers_available": result.providers_available,
+                    "provider_errors": result.provider_errors,
+                    "provider": result.provider,
+                    "face_confidence": result.face_confidence,
+                    "error": result.error,
+                },
+            )
             self._cleanup(tmpdir)
         return result
 
-    # ----------------------------------------------------------- private
     def _save_image(self, job_id: str, tmpdir: str, data: bytes, filename: str) -> str:
         safe = Path(filename).name or "upload.jpg"
         dest = Path(tmpdir) / f"{job_id[:8]}_{safe}"
@@ -117,81 +185,257 @@ class PipelineRunner:
         job_id: str,
         image_path: str,
         result: PipelineResult,
+        timeline: TimelineTracker,
     ) -> None:
-        # 1. Face detection + embedding
+        # 1. Face detection
+        timeline.start("face", "Analyzing uploaded image…")
+        self._sync_progress(job_id, timeline, result, phase="face_detection")
         face = embed_face(image_path)
         if face is None:
             result.error = "No face detected in the uploaded image."
             result.status = "failed"
+            timeline.fail("face", "No face detected")
+            self._sync_progress(job_id, timeline, result, phase="failed")
             self.db.update_job_status(job_id, "failed")
             return
         result.face_detected = True
         result.face_confidence = float(face.confidence)
+        timeline.succeed("face", f"Confidence {result.face_confidence:.3f}")
+        timeline.succeed("embedding", "512-D ArcFace embedding generated")
+        self._sync_progress(job_id, timeline, result, phase="face_complete")
 
-        # 2. Reverse search
+        # 2. Reverse search (multi-provider when configured)
+        from backend.search.visual_search import PROVIDERS
+
+        available = [p.name for p in PROVIDERS if p.available()]
+        provider_hint = ", ".join(available) if available else "none configured"
+        timeline.start("search", f"Querying {len(available)} provider(s): {provider_hint}")
+        self._sync_progress(job_id, timeline, result, phase="searching")
         search = search_web(image_path)
         result.provider = search.provider
+        result.providers_used = list(search.providers_used or [])
+        result.providers_available = search.providers_available or len(result.providers_used)
+        provider_errors = getattr(search, "provider_errors", None) or {}
+        result.provider_errors = dict(provider_errors)
         if not search.has_results:
-            result.error = search.error or "No search results returned."
+            result.error = search.error or "Reverse image search returned no candidates."
             result.status = "failed"
+            timeline.fail("search", result.error)
+            self._sync_progress(job_id, timeline, result, phase="failed")
             self.db.update_job_status(job_id, "failed")
             return
+        timeline.succeed(
+            "search",
+            f"{len(search.results)} hits from {result.provider or provider_hint}",
+        )
+        timeline.succeed("discover", f"{len(search.results)} unique sources discovered")
+        self._sync_progress(job_id, timeline, result, phase="search_complete")
 
-        # 3 + 4. Tiered match
+        # 3 + 4. Match + verify sources
+        timeline.start("verify", f"Verifying up to {self.limit} candidates…")
+        timeline.start("match", "Comparing face embeddings…")
+        self._sync_progress(job_id, timeline, result, phase="matching")
         with MatcherService(threshold=self.threshold) as service:
             evidence = service.match_candidates(
                 face.embedding, search.results[: self.limit]
             )
             result.candidates_seen = len(evidence)
-            candidates = self._build_candidates(job_id, service, evidence)
+            candidates = self._build_candidates(service, evidence, search.providers_available)
+            candidates.sort(
+                key=lambda c: (
+                    c.is_match,
+                    c.evidence_tier == "verified",
+                    c.score,
+                    c.evidence_score,
+                    c.provider_count,
+                ),
+                reverse=True,
+            )
+            for i, c in enumerate(candidates):
+                c.rank = i + 1
             self._persist_candidates(job_id, candidates)
+
+        verified_count = sum(1 for c in candidates if c.evidence_tier == "verified")
+        social_count = sum(1 for c in candidates if c.source_type == "social")
+        match_count = sum(1 for c in candidates if c.is_match)
+        timeline.succeed("verify", f"{verified_count} source pages verified")
+        timeline.succeed("match", f"{match_count} face matches")
+        timeline.start("score", "Computing evidence scores…")
+        timeline.succeed("score", "Evidence scores computed")
+        self._sync_progress(job_id, timeline, result, phase="scoring")
+
+        result.summary = {
+            "candidates_found": len(candidates),
+            "face_matches": match_count,
+            "verified_sources": verified_count,
+            "social_sources": social_count,
+            "providers_used": result.providers_used,
+            "providers_available": result.providers_available,
+            "provider_errors": result.provider_errors,
+            "provider_consensus": (
+                f"{max((c.provider_count for c in candidates), default=0)}/{result.providers_available}"
+                if result.providers_available > 1
+                else "1 provider available"
+            ),
+            "best_evidence_score": candidates[0].evidence_score if candidates else 0,
+        }
 
         matches = [c for c in candidates if c.is_match]
         if self.evidence_tier == "verified_only":
             matches = [c for c in matches if c.evidence_tier == "verified"]
+
         if matches:
             best = self._pick_best(matches)
-            # 5. Fingerprint
-            best.content_hash, best.image_sha256 = self._fingerprint(best)
+            timeline.succeed("select", f"Best: {best.platform} ({best.evidence_tier})")
+            timeline.start("fingerprint", "Building canonical evidence record…")
+            self._sync_progress(job_id, timeline, result, phase="fingerprinting")
+            fp_result = self._fingerprint(best)
+            best.content_hash = fp_result[0]
+            best.image_sha256 = fp_result[1]
+            canonical_json = fp_result[2]
+            evidence_id = fp_result[3]
+            timeline.succeed("fingerprint", best.content_hash[:16] + "…")
             result.best = best
-            # 6. Optional blockchain
+
+            scored = self._to_scored(best)
+            passport = build_passport(
+                scored, evidence_id=evidence_id, content_hash=best.content_hash
+            )
+            result.passport = passport.to_dict()
+            result.passport["canonical_json"] = canonical_json
+            result.passport["image_sha256"] = best.image_sha256
+
             if self.do_blockchain:
+                timeline.start("blockchain", "Registering on Ethereum Sepolia…")
+                self._sync_progress(job_id, timeline, result, phase="blockchain")
                 result.blockchain = self._register(job_id, best.content_hash)
+                if result.blockchain.get("tx_hash"):
+                    passport.tx_hash = result.blockchain["tx_hash"]
+                    passport.block_number = result.blockchain.get("block_number")
+                    passport.blockchain_network = "Ethereum Sepolia"
+                    passport.registered_at = result.blockchain.get("registered_at", "")
+                    passport.integrity_status = "attested"
+                    timeline.succeed("blockchain", result.blockchain["tx_hash"][:16] + "…")
+                else:
+                    timeline.warn(
+                        "blockchain",
+                        result.blockchain.get("error", "Blockchain registration unavailable"),
+                    )
+            else:
+                timeline.warn("blockchain", "Blockchain registration skipped (not configured)")
+                passport.integrity_status = "fingerprinted"
+
+            result.passport = passport.to_dict()
         else:
             result.best = None
+            timeline.warn("select", "No candidates met match threshold")
+            timeline.warn("fingerprint", "Skipped — no qualifying match")
+            timeline.warn("blockchain", "Skipped — no evidence to attest")
 
+        result.status = "complete"
         self.db.update_job_status(job_id, "complete")
 
     def _build_candidates(
         self,
-        job_id: str,
         service: MatcherService,
         evidence: list[CandidateEvidence],
+        providers_available: int,
     ) -> list[MatchEvidence]:
         out: list[MatchEvidence] = []
         for ev in evidence:
             m = ev.best_match
             cache = service.evidence_cache.get(ev.page_url)
             local = (
-                cache.page_local or cache.thumbnail_local
-                if cache is not None else ""
+                cache.page_local or cache.thumbnail_local if cache is not None else ""
             )
-            matched_image_url = self._matched_image_url(ev, m)
+            source = build_source_info(
+                ev.page_url,
+                page_retrieved=ev.page_retrieved,
+                image_retrieved=ev.image_retrieved,
+                platform=ev.platform,
+            )
+            consensus = build_provider_consensus(
+                ev.providers,
+                ev.providers_available or providers_available,
+            )
+            score_obj = compute_evidence_score(
+                face_similarity=ev.score,
+                image_similarity=ev.image_similarity,
+                evidence_tier=ev.tier.value,
+                source=source,
+                consensus=consensus,
+                has_title=bool(ev.title),
+                has_caption=bool(ev.caption),
+            )
+            explanation = build_explanation(
+                face_similarity=ev.score,
+                threshold=self.threshold,
+                evidence_tier=ev.tier.value,
+                source=source,
+                consensus=consensus,
+                is_match=ev.is_match,
+                image_similarity=ev.image_similarity,
+            )
             out.append(
                 MatchEvidence(
                     page_url=ev.page_url,
                     image_url=ev.image_url,
-                    platform=ev.platform or "web",
+                    platform=source.platform,
+                    source_type=source.source_type,
+                    domain=source.domain,
+                    canonical_url=source.canonical_url,
                     title=ev.title,
                     caption=ev.caption,
                     score=ev.score,
                     evidence_tier=ev.tier.value,
+                    evidence_score=score_obj.total,
+                    score_breakdown=score_obj.breakdown,
                     is_match=ev.is_match,
-                    matched_image_url=matched_image_url,
+                    matched_image_url=self._matched_image_url(ev, m),
                     local_image_path=local,
+                    image_similarity=ev.image_similarity,
+                    providers=consensus.providers,
+                    provider_count=consensus.provider_count,
+                    provider_consensus=consensus.provider_consensus,
+                    providers_available=consensus.providers_available,
+                    explanation=explanation.reasons,
+                    page_retrieved=ev.page_retrieved,
+                    image_retrieved=ev.image_retrieved,
                 )
             )
         return out
+
+    @staticmethod
+    def _to_scored(c: MatchEvidence) -> ScoredCandidate:
+        from backend.evidence.models import EvidenceScore, MatchExplanation, ProviderConsensus, SourceInfo
+
+        return ScoredCandidate(
+            source=SourceInfo(
+                source_url=c.page_url,
+                canonical_url=c.canonical_url,
+                domain=c.domain,
+                platform=c.platform,
+                source_type=c.source_type,
+                page_retrieved=c.page_retrieved,
+                image_retrieved=c.image_retrieved,
+            ),
+            consensus=ProviderConsensus(
+                providers=c.providers,
+                provider_count=c.provider_count,
+                providers_available=c.providers_available,
+                provider_consensus=c.provider_consensus,
+            ),
+            face_similarity=c.score,
+            image_similarity=c.image_similarity,
+            evidence_tier=c.evidence_tier,
+            evidence_score=EvidenceScore(total=c.evidence_score, breakdown=c.score_breakdown),
+            explanation=MatchExplanation(reasons=c.explanation),
+            title=c.title,
+            caption=c.caption,
+            image_url=c.image_url,
+            is_match=c.is_match,
+            rank=c.rank,
+        )
 
     @staticmethod
     def _matched_image_url(ev: CandidateEvidence, m) -> str:
@@ -199,11 +443,7 @@ class PipelineRunner:
             return ev.image_url
         return m.image_url or ev.image_url
 
-    def _persist_candidates(
-        self,
-        job_id: str,
-        candidates: list[MatchEvidence],
-    ) -> None:
+    def _persist_candidates(self, job_id: str, candidates: list[MatchEvidence]) -> None:
         for c in candidates:
             self.db.add_post(
                 job_id=job_id,
@@ -214,27 +454,60 @@ class PipelineRunner:
                 title=c.title or "",
                 face_similarity=c.score,
                 evidence_tier=c.evidence_tier,
+                source_type=c.source_type,
+                domain=c.domain,
+                evidence_score=c.evidence_score,
+                provider_count=c.provider_count,
+                providers=c.providers,
+                explanation=c.explanation,
+                metadata={
+                    "score_breakdown": c.score_breakdown,
+                    "provider_consensus": c.provider_consensus,
+                    "image_similarity": c.image_similarity,
+                    "canonical_url": c.canonical_url,
+                    "page_retrieved": c.page_retrieved,
+                    "image_retrieved": c.image_retrieved,
+                    "is_social": is_social_source(c.source_type, c.platform),
+                    "social_handle": extract_social_handle(c.page_url, c.platform) or "",
+                    "rank": c.rank,
+                },
             )
 
     def _pick_best(self, matches: list[MatchEvidence]) -> MatchEvidence:
         return max(
             matches,
-            key=lambda c: (c.evidence_tier == "verified", c.score),
+            key=lambda c: (
+                c.evidence_tier == "verified",
+                c.score,
+                c.source_type == "social",
+                c.evidence_score,
+            ),
         )
 
-    def _fingerprint(self, c: MatchEvidence) -> tuple[str, str]:
+    def _fingerprint(self, c: MatchEvidence) -> tuple[str, str, str, str]:
         img_sha = ""
         if c.local_image_path and Path(c.local_image_path).exists():
             img_sha = image_sha256_from_file(c.local_image_path)
-        record = ContentRecord(
-            post_url=c.page_url,
+        evidence_id = uuid.uuid4().hex[:16]
+        record = EvidenceRecord(
+            evidence_id=evidence_id,
+            source_url=c.page_url,
+            canonical_url=c.canonical_url,
+            platform=c.platform,
+            source_type=c.source_type,
+            face_similarity=c.score,
+            image_similarity=c.image_similarity,
+            evidence_tier=c.evidence_tier,
             image_sha256=img_sha,
             caption=c.caption or "",
-            platform=c.platform,
             title=c.title or "",
-            evidence=c.evidence_tier,
+            providers=c.providers,
+            provider_consensus=c.provider_consensus,
+            evidence_score=c.evidence_score,
+            verification_reasons=c.explanation,
         )
-        return fingerprint(record), img_sha
+        content_hash = fingerprint(record)
+        return content_hash, img_sha, record.canonical_json(), evidence_id
 
     def _register(self, job_id: str, content_hash: str) -> dict:
         from backend.blockchain.registry import register_on_blockchain
@@ -242,15 +515,16 @@ class PipelineRunner:
 
         try:
             tx_hash, block = register_on_blockchain(content_hash)
-            self.db.add_blockchain_record(
-                job_id, content_hash, tx_hash, block
-            )
+            self.db.add_blockchain_record(job_id, content_hash, tx_hash, block)
             verified = verify_on_blockchain(content_hash)
             return {
                 "content_hash": content_hash,
                 "tx_hash": tx_hash,
                 "block_number": block,
                 "verified": verified,
+                "registered_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ).isoformat(),
             }
         except (ValueError, ConnectionError) as exc:
             return {"error": str(exc)}

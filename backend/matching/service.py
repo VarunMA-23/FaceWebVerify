@@ -17,6 +17,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from backend.crawler.collector import Collector
+from backend.crawler.parser import infer_platform
 from backend.face.embedder import embed_face
 from backend.face.matcher import (
     SIMILARITY_THRESHOLD,
@@ -116,6 +117,12 @@ class CandidateEvidence:
         self.best_match: FaceMatch | None = None
         self.thumbnail_local: str = ""
         self.page_local: str = ""
+        self.page_retrieved: bool = False
+        self.image_retrieved: bool = False
+        self.image_similarity: float | None = None
+        self.providers: list[str] = []
+        self.provider_count: int = 0
+        self.providers_available: int = 0
 
     def combine(
         self,
@@ -174,6 +181,7 @@ class MatcherService:
         if not local:
             return None
         self.evidence_cache[source_url].thumbnail_local = local
+        self.evidence_cache[source_url].image_retrieved = True
         try:
             return match_image_to_embedding(
                 reference,
@@ -203,6 +211,14 @@ class MatcherService:
         page = self.collector.fetch_page(source_url)
         if page is None:
             return None
+        cache = self.evidence_cache[source_url]
+        cache.page_retrieved = True
+        if page.title:
+            cache.title = page.title
+        if page.caption:
+            cache.caption = page.caption
+        if page.platform:
+            cache.platform = page.platform
         target = page.primary_image or ""
         if not target:
             return None
@@ -236,12 +252,16 @@ class MatcherService:
         there is no cross-candidate race.
         """
         url = getattr(candidate, "url", "")
+        plat = infer_platform(url)
         ev = CandidateEvidence(
             page_url=url,
             image_url=getattr(candidate, "image_url", ""),
-            platform=getattr(candidate, "source", "web"),
+            platform=plat,
             title=getattr(candidate, "title", ""),
         )
+        ev.providers = list(getattr(candidate, "providers", []) or [])
+        ev.provider_count = int(getattr(candidate, "provider_count", 0) or len(ev.providers))
+        ev.providers_available = int(getattr(candidate, "providers_available", 0) or 0)
         self.evidence_cache[url] = ev
 
         # PATH A: thumbnail first (works for login-walled posts).
@@ -253,6 +273,22 @@ class MatcherService:
             reference_embedding, url, ev.image_url, ev.platform
         )
         ev.combine(reference_embedding, self.threshold)
+        # Image similarity: compare thumbnail vs page image hashes or dual face match scores
+        cache = self.evidence_cache[url]
+        if cache.thumbnail_local and cache.page_local:
+            try:
+                from backend.fingerprint.canonicalizer import image_sha256_from_file
+
+                t_hash = image_sha256_from_file(cache.thumbnail_local)
+                p_hash = image_sha256_from_file(cache.page_local)
+                if t_hash == p_hash:
+                    cache.image_similarity = 1.0
+                elif ev.thumbnail_match and ev.page_match and ev.thumbnail_match.is_match and ev.page_match.is_match:
+                    cache.image_similarity = round(float(min(ev.thumbnail_match.score, ev.page_match.score)), 3)
+                else:
+                    cache.image_similarity = None
+            except Exception:  # noqa: BLE001
+                cache.image_similarity = None
         self._results[index] = ev
 
     def match_candidates(
@@ -272,16 +308,16 @@ class MatcherService:
         """
         self.evidence_cache: dict[str, CandidateEvidence] = {}
 
+        candidates = candidates[: adapt_candidate_limit(len(candidates))]
         # Keep the original order in the returned list regardless of how
         # quickly individual candidates finish.
         self._results: list[CandidateEvidence] = [None] * len(candidates)  # type: ignore[list-item]
-        candidates = candidates[: adapt_candidate_limit(len(candidates))]
 
         workers = max(1, min(MAX_WORKERS, len(candidates)))
         if workers == 1:
             for i, sr in enumerate(candidates):
                 self._match_one(reference_embedding, sr, i)
-            return self._results
+            return [r for r in self._results if r is not None]
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
