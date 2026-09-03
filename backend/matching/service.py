@@ -273,7 +273,7 @@ class MatcherService:
             reference_embedding, url, ev.image_url, ev.platform
         )
         ev.combine(reference_embedding, self.threshold)
-        # Image similarity: compare thumbnail vs page image hashes when both exist
+        # Image similarity: compare thumbnail vs page image hashes or dual face match scores
         cache = self.evidence_cache[url]
         if cache.thumbnail_local and cache.page_local:
             try:
@@ -281,7 +281,12 @@ class MatcherService:
 
                 t_hash = image_sha256_from_file(cache.thumbnail_local)
                 p_hash = image_sha256_from_file(cache.page_local)
-                cache.image_similarity = 1.0 if t_hash == p_hash else None
+                if t_hash == p_hash:
+                    cache.image_similarity = 1.0
+                elif ev.thumbnail_match and ev.page_match and ev.thumbnail_match.is_match and ev.page_match.is_match:
+                    cache.image_similarity = round(float(min(ev.thumbnail_match.score, ev.page_match.score)), 3)
+                else:
+                    cache.image_similarity = None
             except Exception:  # noqa: BLE001
                 cache.image_similarity = None
         self._results[index] = ev
@@ -303,16 +308,16 @@ class MatcherService:
         """
         self.evidence_cache: dict[str, CandidateEvidence] = {}
 
+        candidates = candidates[: adapt_candidate_limit(len(candidates))]
         # Keep the original order in the returned list regardless of how
         # quickly individual candidates finish.
         self._results: list[CandidateEvidence] = [None] * len(candidates)  # type: ignore[list-item]
-        candidates = candidates[: adapt_candidate_limit(len(candidates))]
 
         workers = max(1, min(MAX_WORKERS, len(candidates)))
         if workers == 1:
             for i, sr in enumerate(candidates):
                 self._match_one(reference_embedding, sr, i)
-            return self._results
+            return [r for r in self._results if r is not None]
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [

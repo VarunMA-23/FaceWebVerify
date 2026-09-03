@@ -242,7 +242,13 @@ class PipelineRunner:
             result.candidates_seen = len(evidence)
             candidates = self._build_candidates(service, evidence, search.providers_available)
             candidates.sort(
-                key=lambda c: (c.evidence_score, c.score, c.provider_count),
+                key=lambda c: (
+                    c.is_match,
+                    c.evidence_tier == "verified",
+                    c.score,
+                    c.evidence_score,
+                    c.provider_count,
+                ),
                 reverse=True,
             )
             for i, c in enumerate(candidates):
@@ -472,9 +478,9 @@ class PipelineRunner:
             matches,
             key=lambda c: (
                 c.evidence_tier == "verified",
+                c.score,
                 c.source_type == "social",
                 c.evidence_score,
-                c.score,
             ),
         )
 

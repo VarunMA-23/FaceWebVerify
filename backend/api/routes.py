@@ -164,7 +164,15 @@ def get_search(job_id: str, db: Database = Depends(get_db)) -> SearchResponseMod
     meta = db.get_job_metadata(job_id)
     posts = db.get_posts(job_id)
     candidates = [_post_from_row(p) for p in posts]
-    candidates.sort(key=lambda c: (-c.evidence_score, -c.similarity))
+    candidates.sort(
+        key=lambda c: (
+            c.matched,
+            c.evidence_tier == "verified",
+            c.similarity,
+            c.evidence_score,
+        ),
+        reverse=True,
+    )
 
     matched = [c for c in candidates if c.matched]
     matched_post = matched[0] if matched else None

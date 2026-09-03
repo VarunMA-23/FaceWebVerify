@@ -21,6 +21,7 @@ class AggregatedResult:
     provider_count: int = 0
     canonical_url: str = ""
     domain: str = ""
+    best_rank: int = 999999
 
 
 @dataclass
@@ -80,7 +81,7 @@ def search_all_providers(image_path: str) -> AggregatedSearchResponse:
     for provider_name, resp in responses.items():
         if not resp.has_results:
             continue
-        for sr in resp.results:
+        for rank, sr in enumerate(resp.results):
             key = canonicalize_url(sr.url) or sr.url
             if key not in grouped:
                 grouped[key] = AggregatedResult(
@@ -89,8 +90,10 @@ def search_all_providers(image_path: str) -> AggregatedSearchResponse:
                     title=sr.title,
                     canonical_url=key,
                     domain=extract_domain(sr.url),
+                    best_rank=rank,
                 )
             entry = grouped[key]
+            entry.best_rank = min(entry.best_rank, rank)
             if provider_name not in entry.providers:
                 entry.providers.append(provider_name)
             entry.provider_count = len(entry.providers)
@@ -101,7 +104,7 @@ def search_all_providers(image_path: str) -> AggregatedSearchResponse:
 
     results = sorted(
         grouped.values(),
-        key=lambda r: (-r.provider_count, r.url),
+        key=lambda r: (-r.provider_count, r.best_rank),
     )
 
     used = [n for n, r in responses.items() if r.has_results]
