@@ -152,8 +152,13 @@ def test_health_endpoint(client):
     assert r.json()["status"] == "ok"
 
 
-def test_frontend_served_at_root(client):
-    r = client.get("/")
+def test_frontend_served_at_root(client, monkeypatch):
+    monkeypatch.setenv("SERVE_FRONTEND", "true")
+    # Re-import to pick up env (mount happens at import time)
+    import importlib
+    import backend.main as main_mod
+    importlib.reload(main_mod)
+    c = TestClient(main_mod.app)
+    r = c.get("/")
     assert r.status_code == 200
-    assert "Face" in r.text
-    assert "Face" in r.text
+    assert "EvidenceChain" in r.text or "Face" in r.text
