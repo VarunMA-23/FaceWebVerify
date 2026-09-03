@@ -118,6 +118,7 @@ async def create_search(
     file: UploadFile = File(...),
     limit: int = 5,
     threshold: float = 0.4,
+    hint: str = "",
 ) -> JobAccepted:
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -134,7 +135,7 @@ async def create_search(
     db = Database()
     db.create_job(job_id, f"pending:{file.filename or 'upload.jpg'}")
     runner = _runner(db, limit=limit, threshold=threshold)
-    _executor.submit(_run_job, runner, db, job_id, data, file.filename, limit, threshold)
+    _executor.submit(_run_job, runner, db, job_id, data, file.filename, limit, threshold, hint)
     return JobAccepted(job_id=job_id, status="processing")
 
 
@@ -146,11 +147,12 @@ def _run_job(
     filename: str,
     limit: int,
     threshold: float,
+    hint: str = "",
 ) -> None:
     try:
         runner.limit = limit
         runner.threshold = threshold
-        runner.run(data, filename or "upload.jpg", job_id=job_id)
+        runner.run(data, filename or "upload.jpg", job_id=job_id, hint=hint)
     except Exception:  # noqa: BLE001
         db.update_job_status(job_id, "failed")
 
@@ -225,6 +227,7 @@ def get_search(job_id: str, db: Database = Depends(get_db)) -> SearchResponseMod
         blockchain=blockchain,
         error=meta.get("error") or None,
         candidates=candidates,
+        case_dir=meta.get("case_dir") or "",
     )
 
 

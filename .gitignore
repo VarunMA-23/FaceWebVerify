@@ -16,6 +16,7 @@ venv/
 # Uploads / temp artifacts
 uploads/
 data/
+out/
 *.onnx
 
 # Models (large binary files, use Git LFS or download separately)

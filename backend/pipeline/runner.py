@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
+
 from backend.evidence.explain import build_explanation
 from backend.evidence.models import ScoredCandidate
 from backend.evidence.passport import build_passport
@@ -20,6 +22,8 @@ from backend.face.embedder import embed_face
 from backend.fingerprint.canonicalizer import EvidenceRecord, image_sha256_from_file
 from backend.fingerprint.hasher import fingerprint
 from backend.matching.service import MatcherService, CandidateEvidence
+from backend.output import CaseDir
+from backend.search.social import social_search
 from backend.search.visual_search import search_web
 
 
@@ -73,6 +77,7 @@ class PipelineResult:
     timeline: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     blockchain: dict = field(default_factory=dict)
+    case_dir: str = ""
     error: str = ""
 
 
@@ -96,6 +101,7 @@ class PipelineRunner:
         evidence_tier: str = "all",
         do_blockchain: bool = False,
         temp_dir: str | None = None,
+        hint: str = "",
     ) -> None:
         self.db = db
         self.limit = limit
@@ -103,6 +109,7 @@ class PipelineRunner:
         self.evidence_tier = evidence_tier
         self.do_blockchain = _blockchain_enabled(do_blockchain)
         self.temp_dir = temp_dir
+        self.hint = hint
 
     def _sync_progress(
         self,
@@ -129,6 +136,7 @@ class PipelineRunner:
                 "face_detected": result.face_detected,
                 "candidates_seen": result.candidates_seen,
                 "error": result.error,
+                "case_dir": result.case_dir,
             },
         )
 
@@ -137,8 +145,11 @@ class PipelineRunner:
         image_data: bytes,
         filename: str = "upload.jpg",
         job_id: str | None = None,
+        hint: str | None = None,
     ) -> PipelineResult:
         job_id = job_id or uuid.uuid4().hex
+        if hint is not None:
+            self.hint = hint
         tmpdir = self.temp_dir or tempfile.mkdtemp(prefix="pipeline_")
         saved = self._save_image(job_id, tmpdir, image_data, filename)
         self.db.create_job(job_id, saved)
@@ -165,6 +176,7 @@ class PipelineRunner:
                     "provider": result.provider,
                     "face_confidence": result.face_confidence,
                     "error": result.error,
+                    "case_dir": result.case_dir,
                 },
             )
             self._cleanup(tmpdir)
@@ -187,6 +199,9 @@ class PipelineRunner:
         result: PipelineResult,
         timeline: TimelineTracker,
     ) -> None:
+        case_dir = CaseDir()
+        result.case_dir = str(case_dir.path)
+
         # 1. Face detection
         timeline.start("face", "Analyzing uploaded image…")
         self._sync_progress(job_id, timeline, result, phase="face_detection")
@@ -204,6 +219,16 @@ class PipelineRunner:
         timeline.succeed("embedding", "512-D ArcFace embedding generated")
         self._sync_progress(job_id, timeline, result, phase="face_complete")
 
+        # 1b. Persist input + annotated artefacts (non-essential; best effort)
+        try:
+            from backend.face.model import read_image
+
+            raw_img = read_image(image_path)
+            case_dir.save_input(Path(image_path).read_bytes(), Path(image_path).name)
+            case_dir.save_annotated(raw_img, [face], label="input")
+        except Exception:  # noqa: BLE001
+            pass
+
         # 2. Reverse search (multi-provider when configured)
         from backend.search.visual_search import PROVIDERS
 
@@ -212,6 +237,19 @@ class PipelineRunner:
         timeline.start("search", f"Querying {len(available)} provider(s): {provider_hint}")
         self._sync_progress(job_id, timeline, result, phase="searching")
         search = search_web(image_path)
+
+        # 2b. Keyless social fallback when keyed providers return nothing
+        if not search.has_results and self.hint:
+            timeline.start(
+                "search",
+                f"Keyed providers: {provider_hint or 'none configured'} — falling back to keyless social APIs",
+            )
+            self._sync_progress(job_id, timeline, result, phase="searching_social")
+            social = social_search(self.hint)
+            result.provider_errors = dict(social.provider_errors or {})
+            if social.has_results:
+                search = social
+
         result.provider = search.provider
         result.providers_used = list(search.providers_used or [])
         result.providers_available = search.providers_available or len(result.providers_used)
@@ -287,6 +325,13 @@ class PipelineRunner:
         if matches:
             best = self._pick_best(matches)
             timeline.succeed("select", f"Best: {best.platform} ({best.evidence_tier})")
+
+        # 4b. Persist match artifacts (matched image + annotations)
+        try:
+            self._save_match_artifacts(case_dir, best)
+        except Exception:  # noqa: BLE001
+            pass
+
             timeline.start("fingerprint", "Building canonical evidence record…")
             self._sync_progress(job_id, timeline, result, phase="fingerprinting")
             fp_result = self._fingerprint(best)
@@ -296,6 +341,17 @@ class PipelineRunner:
             evidence_id = fp_result[3]
             timeline.succeed("fingerprint", best.content_hash[:16] + "…")
             result.best = best
+
+            # Persist the exact canonical evidence bundle to the case directory
+            try:
+                import json as _json
+
+                bundle = _json.loads(canonical_json) if isinstance(canonical_json, str) else canonical_json
+                if isinstance(bundle, dict):
+                    bundle["case_dir"] = str(case_dir.path)
+                case_dir.save_evidence(bundle)
+            except Exception:  # noqa: BLE001
+                pass
 
             scored = self._to_scored(best)
             passport = build_passport(
@@ -316,6 +372,10 @@ class PipelineRunner:
                     passport.registered_at = result.blockchain.get("registered_at", "")
                     passport.integrity_status = "attested"
                     timeline.succeed("blockchain", result.blockchain["tx_hash"][:16] + "…")
+                    try:
+                        case_dir.save_receipt(result.blockchain)
+                    except Exception:  # noqa: BLE001
+                        pass
                 else:
                     timeline.warn(
                         "blockchain",
@@ -442,6 +502,27 @@ class PipelineRunner:
         if m is None:
             return ev.image_url
         return m.image_url or ev.image_url
+
+    def _save_match_artifacts(
+        self,
+        case_dir: CaseDir,
+        best: MatchEvidence,
+    ) -> None:
+        """Save the matched image bytes and its annotation."""
+        if not best.local_image_path or not Path(best.local_image_path).exists():
+            return
+        from backend.face.detector import detect_faces
+
+        best_img = cv2.imread(best.local_image_path)
+        if best_img is None:
+            return
+
+        # Save the raw downloaded image bytes
+        case_dir.save_match_bytes(Path(best.local_image_path).read_bytes())
+
+        # Detect faces for annotation
+        faces = detect_faces(best_img)
+        case_dir.save_match_annotated(best_img, faces)
 
     def _persist_candidates(self, job_id: str, candidates: list[MatchEvidence]) -> None:
         for c in candidates:

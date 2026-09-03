@@ -114,6 +114,7 @@ class SearchResponseModel(BaseModel):
     blockchain: Optional[BlockchainSummary] = None
     error: Optional[str] = None
     candidates: list[PostSummary] = Field(default_factory=list)
+    case_dir: str = ""
 
 
 class VerifyResponseModel(BaseModel):
