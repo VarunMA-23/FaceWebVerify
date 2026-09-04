@@ -127,6 +127,18 @@ class VerifyResponseModel(BaseModel):
     error: Optional[str] = None
 
 
+class IndependentEvidenceVerificationModel(BaseModel):
+    evidence_id: str
+    verified: bool
+    on_chain: bool
+    status: str
+    content_hash: str
+    issuer: str
+    timestamp: int
+    network: str
+    contract_address: str
+
+
 class IntegrityResponseModel(BaseModel):
     job_id: str
     integrity_verified: bool = False

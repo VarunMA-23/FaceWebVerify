@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS blockchain_records (
     transaction_hash TEXT,
     block_number INTEGER,
     registered_at TIMESTAMP,
+    evidence_id TEXT,
+    record_type TEXT NOT NULL DEFAULT 'content_registration',
     FOREIGN KEY (job_id) REFERENCES jobs(job_id)
 );
 """
@@ -63,6 +65,8 @@ _MIGRATIONS = [
     "ALTER TABLE discovered_posts ADD COLUMN providers_json TEXT DEFAULT ''",
     "ALTER TABLE discovered_posts ADD COLUMN explanation_json TEXT DEFAULT ''",
     "ALTER TABLE discovered_posts ADD COLUMN metadata_json TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN evidence_id TEXT",
+    "ALTER TABLE blockchain_records ADD COLUMN record_type TEXT NOT NULL DEFAULT 'content_registration'",
 ]
 
 
@@ -190,19 +194,70 @@ class Database:
         content_hash: str,
         transaction_hash: str,
         block_number: int | None,
+        evidence_id: str | None = None,
+        record_type: str = "content_registration",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO blockchain_records "
-                "(job_id, content_hash, transaction_hash, block_number, registered_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (job_id, content_hash, transaction_hash, block_number, _now()),
+                "(job_id, content_hash, transaction_hash, block_number, registered_at, "
+                "evidence_id, record_type) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job_id,
+                    content_hash,
+                    transaction_hash,
+                    block_number,
+                    _now(),
+                    evidence_id,
+                    record_type,
+                ),
             )
 
     def get_blockchain_record(self, job_id: str) -> dict | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM blockchain_records WHERE job_id=? ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM blockchain_records "
+                "WHERE job_id=? AND record_type='content_registration' "
+                "ORDER BY id DESC LIMIT 1",
                 (job_id,),
             ).fetchone()
+        return dict(row) if row else None
+
+    def get_evidence_attestation_record(
+        self,
+        job_id: str,
+        evidence_id: str | None = None,
+    ) -> dict | None:
+        query = (
+            "SELECT * FROM blockchain_records "
+            "WHERE job_id=? AND record_type='evidence_attestation'"
+        )
+        params: list[str] = [job_id]
+        if evidence_id is not None:
+            query += " AND evidence_id=?"
+            params.append(evidence_id)
+        query += " ORDER BY id DESC LIMIT 1"
+
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return dict(row) if row else None
+
+    def get_evidence_revocation_record(
+        self,
+        job_id: str,
+        evidence_id: str | None = None,
+    ) -> dict | None:
+        query = (
+            "SELECT * FROM blockchain_records "
+            "WHERE job_id=? AND record_type='evidence_revocation'"
+        )
+        params: list[str] = [job_id]
+        if evidence_id is not None:
+            query += " AND evidence_id=?"
+            params.append(evidence_id)
+        query += " ORDER BY id DESC LIMIT 1"
+
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
         return dict(row) if row else None

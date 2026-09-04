@@ -82,12 +82,7 @@ class PipelineResult:
 
 
 def _blockchain_enabled(explicit: bool) -> bool:
-    if explicit:
-        return True
-    return bool(
-        os.environ.get("SEPOLIA_WALLET_PRIVATE_KEY", "").strip()
-        and os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "").strip()
-    )
+    return bool(explicit)
 
 
 class PipelineRunner:
@@ -339,6 +334,7 @@ class PipelineRunner:
             best.image_sha256 = fp_result[1]
             canonical_json = fp_result[2]
             evidence_id = fp_result[3]
+            evidence_record = fp_result[4]
             timeline.succeed("fingerprint", best.content_hash[:16] + "…")
             result.best = best
 
@@ -360,11 +356,16 @@ class PipelineRunner:
             result.passport = passport.to_dict()
             result.passport["canonical_json"] = canonical_json
             result.passport["image_sha256"] = best.image_sha256
+            result.passport["evidence_record"] = evidence_record
 
             if self.do_blockchain:
                 timeline.start("blockchain", "Registering on Ethereum Sepolia…")
                 self._sync_progress(job_id, timeline, result, phase="blockchain")
-                result.blockchain = self._register(job_id, best.content_hash)
+                result.blockchain = self._register(
+                    job_id,
+                    best.content_hash,
+                    result.passport["evidence_record"]["evidence_id"],
+                )
                 if result.blockchain.get("tx_hash"):
                     passport.tx_hash = result.blockchain["tx_hash"]
                     passport.block_number = result.blockchain.get("block_number")
@@ -565,7 +566,7 @@ class PipelineRunner:
             ),
         )
 
-    def _fingerprint(self, c: MatchEvidence) -> tuple[str, str, str, str]:
+    def _fingerprint(self, c: MatchEvidence) -> tuple[str, str, str, str, dict]:
         img_sha = ""
         if c.local_image_path and Path(c.local_image_path).exists():
             img_sha = image_sha256_from_file(c.local_image_path)
@@ -588,15 +589,30 @@ class PipelineRunner:
             verification_reasons=c.explanation,
         )
         content_hash = fingerprint(record)
-        return content_hash, img_sha, record.canonical_json(), evidence_id
+        return content_hash, img_sha, record.canonical_json(), evidence_id, record.canonical_dict()
 
-    def _register(self, job_id: str, content_hash: str) -> dict:
-        from backend.blockchain.registry import register_on_blockchain
+    def _register(self, job_id: str, content_hash: str, evidence_id: str) -> dict:
+        from backend.blockchain.registry import (
+            register_evidence_on_blockchain,
+            register_on_blockchain,
+        )
         from backend.blockchain.verifier import verify_on_blockchain
 
         try:
             tx_hash, block = register_on_blockchain(content_hash)
             self.db.add_blockchain_record(job_id, content_hash, tx_hash, block)
+            register_evidence_tx_hash, register_evidence_block = register_evidence_on_blockchain(
+                evidence_id,
+                content_hash,
+            )
+            self.db.add_blockchain_record(
+                job_id,
+                content_hash,
+                register_evidence_tx_hash,
+                register_evidence_block,
+                evidence_id=evidence_id,
+                record_type="evidence_attestation",
+            )
             verified = verify_on_blockchain(content_hash)
             return {
                 "content_hash": content_hash,
