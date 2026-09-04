@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from backend.api.schemas import (
     BlockchainSummary,
     EvidencePassportModel,
+    IndependentEvidenceVerificationModel,
     IntegrityResponseModel,
     PostSummary,
     SearchResponseModel,
@@ -27,10 +28,14 @@ from backend.evidence.source import (
     platform_display_name,
 )
 from backend.blockchain.integrity import verify_integrity
+from backend.blockchain.verifier import get_evidence_from_blockchain
+from backend.blockchain.verifier import verify_evidence_on_blockchain
 from backend.blockchain.verifier import verify_on_blockchain
 from backend.database.models import Database
 from backend.fingerprint.canonicalizer import EvidenceRecord
 from backend.fingerprint.hasher import fingerprint
+from backend.blockchain.registry import revoke_evidence_on_blockchain
+from backend.blockchain.contract import get_contract_address
 from backend.pipeline.runner import PipelineRunner
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -44,6 +49,34 @@ _executor = ThreadPoolExecutor(max_workers=2)
 class JobAccepted(BaseModel):
     job_id: str
     status: str = "processing"
+
+
+@router.get(
+    "/evidence/{evidence_id}/verify",
+    response_model=IndependentEvidenceVerificationModel,
+)
+def verify_independent_evidence(evidence_id: str) -> IndependentEvidenceVerificationModel:
+    try:
+        evidence = get_evidence_from_blockchain(evidence_id)
+    except ValueError as exc:
+        if "Evidence is not registered:" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (ConnectionError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    active = evidence["status"] == "active"
+    return IndependentEvidenceVerificationModel(
+        evidence_id=evidence_id,
+        verified=active,
+        on_chain=True,
+        status=evidence["status"],
+        content_hash=evidence["content_hash"],
+        issuer=evidence["issuer"],
+        timestamp=evidence["timestamp"],
+        network="Ethereum Sepolia",
+        contract_address=get_contract_address(),
+    )
 
 
 def _runner(db: Database | None = None, limit: int = 5, threshold: float = 0.4) -> PipelineRunner:
@@ -259,6 +292,68 @@ def verify_search(job_id: str, db: Database = Depends(get_db)) -> VerifyResponse
     )
 
 
+@router.post("/{job_id}/evidence/{evidence_id}/revoke")
+def revoke_evidence(job_id: str, evidence_id: str, db: Database = Depends(get_db)) -> dict:
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    evidence_attestation = db.get_evidence_attestation_record(job_id, evidence_id)
+    if evidence_attestation is None:
+        raise HTTPException(status_code=404, detail="Evidence attestation not found.")
+
+    content_hash = evidence_attestation["content_hash"]
+    try:
+        evidence = get_evidence_from_blockchain(evidence_id)
+    except (ValueError, ConnectionError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Blockchain evidence lookup failed: {exc}",
+        ) from exc
+
+    if evidence["content_hash"].lower().removeprefix("0x") != content_hash.lower().removeprefix("0x"):
+        raise HTTPException(
+            status_code=409,
+            detail="On-chain evidence content hash does not match the stored attestation.",
+        )
+    if evidence["status"] != "active":
+        raise HTTPException(status_code=409, detail="Evidence is not active.")
+
+    try:
+        tx_hash, block_number = revoke_evidence_on_blockchain(evidence_id)
+    except (ValueError, ConnectionError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Blockchain evidence revocation failed: {exc}",
+        ) from exc
+
+    try:
+        db.add_blockchain_record(
+            job_id,
+            content_hash,
+            tx_hash,
+            block_number,
+            evidence_id=evidence_id,
+            record_type="evidence_revocation",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "On-chain evidence revocation succeeded, but local persistence failed: "
+                f"{exc}"
+            ),
+        ) from exc
+
+    return {
+        "job_id": job_id,
+        "evidence_id": evidence_id,
+        "status": "revoked",
+        "tx_hash": tx_hash,
+        "block_number": block_number,
+    }
+
+
 @router.get("/{job_id}/integrity", response_model=IntegrityResponseModel)
 def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> IntegrityResponseModel:
     """Re-verify integrity: compare attested hash vs current evidence record."""
@@ -278,10 +373,14 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
         except (ValueError, ConnectionError):
             on_chain = False
 
-    # Recompute from stored canonical JSON if available
+    # Recompute from the persisted structured evidence record when available.
+    evidence_record = passport.get("evidence_record") or {}
     canonical_json = passport.get("canonical_json") or ""
     current_hash = ""
-    if canonical_json:
+    if evidence_record:
+        record = EvidenceRecord(**evidence_record)
+        current_hash = fingerprint(record)
+    elif canonical_json:
         from backend.fingerprint.hasher import fingerprint_from_canonical_json
         current_hash = fingerprint_from_canonical_json(canonical_json)
     elif passport:
@@ -303,6 +402,59 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
         current_hash = fingerprint(record)
 
     result = verify_integrity(attested, current_hash, on_chain)
+    evidence_id = (evidence_record or {}).get("evidence_id") or passport.get("evidence_id") or ""
+    evidence_attestation = None
+    if evidence_id:
+        evidence_attestation = db.get_evidence_attestation_record(job_id, evidence_id)
+
+    details = {"evidence_id": evidence_id} if evidence_id else {}
+    if evidence_attestation:
+        evidence_content_hash = evidence_attestation["content_hash"]
+        try:
+            evidence_on_chain = verify_evidence_on_blockchain(
+                evidence_id,
+                evidence_content_hash,
+            )
+        except (ValueError, ConnectionError):
+            evidence_on_chain = False
+        evidence_hash_matches_current = bool(current_hash) and (
+            evidence_content_hash.lower() == current_hash.lower()
+        )
+        details.update({
+            "evidence_content_hash": evidence_content_hash,
+            "evidence_verified": evidence_on_chain and evidence_hash_matches_current,
+            "evidence_hash_matches_current": evidence_hash_matches_current,
+            "evidence_on_chain": evidence_on_chain,
+            "evidence_tx_hash": evidence_attestation.get("transaction_hash"),
+            "evidence_block_number": evidence_attestation.get("block_number"),
+        })
+        try:
+            on_chain_evidence = get_evidence_from_blockchain(evidence_id)
+        except (ValueError, ConnectionError):
+            on_chain_evidence = None
+        if on_chain_evidence:
+            details.update(
+                {
+                    "issuer": on_chain_evidence["issuer"],
+                    "timestamp": on_chain_evidence["timestamp"],
+                    "status": on_chain_evidence["status"],
+                    "evidence_content_hash_on_chain": on_chain_evidence["content_hash"],
+                    "evidence_on_chain_hash_matches_attestation": (
+                        on_chain_evidence["content_hash"].lower()
+                        == evidence_content_hash.lower()
+                    ),
+                }
+            )
+    elif evidence_id:
+        details.update(
+            {
+                "evidence_verified": False,
+                "evidence_hash_matches_current": False,
+                "evidence_on_chain": False,
+            }
+        )
+
+    result["details"] = details
     return IntegrityResponseModel(job_id=job_id, **result)
 
 

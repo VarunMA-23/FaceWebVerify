@@ -29,6 +29,23 @@ CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
         "type": "function",
     },
     {
+        "inputs": [
+            {"internalType": "bytes32", "name": "evidenceId", "type": "bytes32"},
+            {"internalType": "bytes32", "name": "contentHash", "type": "bytes32"},
+        ],
+        "name": "registerEvidence",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "evidenceId", "type": "bytes32"}],
+        "name": "revokeEvidence",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
         "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
         "name": "registered",
         "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
@@ -39,6 +56,25 @@ CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
         "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
         "name": "registeredAt",
         "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "name": "evidenceContentHash",
+        "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "evidenceId", "type": "bytes32"}],
+        "name": "getEvidence",
+        "outputs": [
+            {"internalType": "bytes32", "name": "contentHash", "type": "bytes32"},
+            {"internalType": "address", "name": "issuer", "type": "address"},
+            {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
+            {"internalType": "uint8", "name": "status", "type": "uint8"},
+        ],
         "stateMutability": "view",
         "type": "function",
     },
@@ -90,3 +126,10 @@ def hash_to_bytes32(content_sha256: str) -> bytes:
     if len(raw) != 32:
         raise ValueError(f"Expected 32-byte (64 hex) SHA-256 digest, got {len(raw) * 2} hex chars")
     return raw
+
+
+def evidence_id_to_bytes32(evidence_id: str) -> bytes:
+    """Convert an application evidence ID to an Ethereum bytes32 value."""
+    if not isinstance(evidence_id, str) or not evidence_id:
+        raise ValueError("Evidence ID must be a non-empty string")
+    return bytes(Web3.keccak(text=evidence_id))

@@ -253,6 +253,8 @@ input[type=file]{display:none}
 .passport-field .pf-v{font-size:.875rem;word-break:break-all}
 .passport-field.full{grid-column:1/-1}
 .passport-actions{display:flex;flex-wrap:wrap;gap:10px;padding:20px 24px;border-top:1px solid var(--border);background:var(--surface-muted)}
+.passport-chain-check{padding:20px 24px;border-top:1px solid var(--border)}
+.passport-chain-result{margin-top:12px}
 
 /* Blockchain */
 .chain-status{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;font-size:.8125rem;font-weight:600}
@@ -922,6 +924,11 @@ function renderPassport(p, bc) {
       <button class="btn btn-secondary" id="exportEvidenceBtn"><i data-lucide="download" style="width:16px;height:16px"></i> Export Evidence</button>
       <button class="btn btn-secondary" id="copyEvidenceBtn"><i data-lucide="copy" style="width:16px;height:16px"></i> Copy Evidence ID</button>
     </div>`;
+  $('passportCard').insertAdjacentHTML('beforeend', `
+    <div class="passport-chain-check">
+      <button class="btn btn-primary" id="passportChainVerifyBtn"><i data-lucide="shield-check" style="width:16px;height:16px"></i> Verify on Blockchain</button>
+      <div class="passport-chain-result" id="passportChainResult" aria-live="polite"></div>
+    </div>`);
   icons();
   const copyBtn = $('copyEvidenceBtn');
   if (copyBtn) copyBtn.onclick = () => { if(p.evidence_id) navigator.clipboard.writeText(p.evidence_id); };
@@ -929,6 +936,48 @@ function renderPassport(p, bc) {
   if (exportBtn) exportBtn.onclick = () => exportEvidence();
   const pvBtn = $('passportVerifyBtn');
   if (pvBtn) pvBtn.onclick = () => { runIntegrity(); $('integrityPanel').scrollIntoView({behavior:'smooth'}); };
+  const chainBtn = $('passportChainVerifyBtn');
+  if (chainBtn) chainBtn.onclick = () => verifyPassportOnChain(p.evidence_id);
+}
+
+async function verifyPassportOnChain(evidenceId) {
+  const button = $('passportChainVerifyBtn');
+  const result = $('passportChainResult');
+  if (!evidenceId || !button || !result) return;
+  button.disabled = true;
+  result.innerHTML = '<p style="font-size:.8125rem;color:var(--text-muted)">Checking blockchain…</p>';
+  try {
+    const response = await fetch(`${API_BASE}/evidence/${encodeURIComponent(evidenceId)}/verify`);
+    let payload = {};
+    try { payload = await response.json(); } catch(e) {}
+    if (!response.ok) {
+      const message = response.status === 404
+        ? 'Evidence not registered on this contract.'
+        : response.status === 502
+          ? 'Blockchain verification unavailable.'
+          : 'Blockchain verification failed.';
+      result.innerHTML = `<div class="integrity-panel changed"><p>${message}</p></div>`;
+      return;
+    }
+    const revoked = payload.status === 'revoked';
+    const heading = revoked ? 'Revoked' : '✓ Verified on-chain';
+    result.innerHTML = `
+      <div class="integrity-panel ${revoked?'changed':'verified'}">
+        <h3 style="font-size:1rem;font-weight:600;margin-bottom:12px">${heading}</h3>
+        <div class="passport-body" style="padding:0">
+          <div class="passport-field"><div class="pf-k">Issuer</div><div class="pf-v mono">${esc(payload.issuer)}</div></div>
+          <div class="passport-field"><div class="pf-k">Timestamp</div><div class="pf-v">${esc(new Date(payload.timestamp * 1000).toISOString())}</div></div>
+          <div class="passport-field full"><div class="pf-k">Content Hash</div><div class="pf-v mono">${esc(payload.content_hash)}</div></div>
+          <div class="passport-field"><div class="pf-k">Network</div><div class="pf-v">${esc(payload.network)}</div></div>
+          <div class="passport-field"><div class="pf-k">Contract</div><div class="pf-v mono">${esc(payload.contract_address)}</div></div>
+        </div>
+      </div>`;
+  } catch(e) {
+    result.innerHTML = '<div class="integrity-panel changed"><p>Blockchain verification unavailable.</p></div>';
+  } finally {
+    button.disabled = false;
+    icons();
+  }
 }
 
 async function exportEvidence() {

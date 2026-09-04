@@ -13,13 +13,22 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
 load_dotenv()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api.routes import router
+from backend.api.routes import router, verify_independent_evidence
+from backend.api.schemas import IndependentEvidenceVerificationModel
+
+evidence_router = APIRouter(prefix="/evidence", tags=["evidence"])
+evidence_router.add_api_route(
+    "/{evidence_id}/verify",
+    verify_independent_evidence,
+    methods=["GET"],
+    response_model=IndependentEvidenceVerificationModel,
+)
 
 app = FastAPI(
     title="Face-Web-Blockchain Pipeline",
@@ -42,6 +51,7 @@ app.add_middleware(
 
 # API routes (registered before the static mount so they take precedence).
 app.include_router(router)
+app.include_router(evidence_router)
 
 
 @app.get("/api/health")

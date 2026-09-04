@@ -34,7 +34,7 @@ def verify_integrity(attested_hash: str, current_hash: str, on_chain: bool) -> d
             "on_chain": on_chain,
         }
     match = attested_hash.lower() == current_hash.lower()
-    if match:
+    if match and on_chain:
         return {
             "integrity_verified": True,
             "status": "verified",
