@@ -264,16 +264,53 @@ class PipelineRunner:
         timeline.succeed("discover", f"{len(search.results)} unique sources discovered")
         self._sync_progress(job_id, timeline, result, phase="search_complete")
 
-        # 3 + 4. Match + verify sources
-        timeline.start("verify", f"Verifying up to {self.limit} candidates…")
+        # 3 + 4. Match + verify sources — process in batches, stop on first match
+        total_results = len(search.results)
+        timeline.start("verify", f"Verifying up to {total_results} candidates (batch size {self.limit})…")
         timeline.start("match", "Comparing face embeddings…")
         self._sync_progress(job_id, timeline, result, phase="matching")
         with MatcherService(threshold=self.threshold) as service:
-            evidence = service.match_candidates(
-                face.embedding, search.results[: self.limit]
-            )
-            result.candidates_seen = len(evidence)
-            candidates = self._build_candidates(service, evidence, search.providers_available)
+            all_candidates: list[MatchEvidence] = []
+            remaining = list(search.results)
+            batch_num = 0
+            found_match = False
+
+            while remaining:
+                batch_num += 1
+                batch = remaining[: self.limit]
+                remaining = remaining[self.limit:]
+                checked = len(all_candidates)
+
+                timeline.start(
+                    "match",
+                    f"Batch {batch_num}: candidates {checked + 1}–{checked + len(batch)} of {total_results}…",
+                )
+                self._sync_progress(job_id, timeline, result, phase="matching")
+
+                batch_evidence = service.match_candidates(face.embedding, batch)
+                batch_candidates = self._build_candidates(
+                    service, batch_evidence, search.providers_available
+                )
+                all_candidates.extend(batch_candidates)
+
+                has_match = any(c.is_match for c in batch_candidates)
+                if has_match:
+                    timeline.succeed("match", f"Match found in batch {batch_num}")
+                    found_match = True
+                    break
+
+                if remaining:
+                    timeline.start(
+                        "match",
+                        f"No match in batch {batch_num} — trying next {len(remaining)} candidates…",
+                    )
+                    self._sync_progress(job_id, timeline, result, phase="matching")
+
+            if not found_match:
+                timeline.warn("match", f"No match across {len(all_candidates)} candidates checked")
+
+            candidates = all_candidates
+            result.candidates_seen = len(candidates)
             candidates.sort(
                 key=lambda c: (
                     c.is_match,
@@ -321,11 +358,11 @@ class PipelineRunner:
             best = self._pick_best(matches)
             timeline.succeed("select", f"Best: {best.platform} ({best.evidence_tier})")
 
-        # 4b. Persist match artifacts (matched image + annotations)
-        try:
-            self._save_match_artifacts(case_dir, best)
-        except Exception:  # noqa: BLE001
-            pass
+            # 4b. Persist match artifacts (matched image + annotations)
+            try:
+                self._save_match_artifacts(case_dir, best)
+            except Exception:  # noqa: BLE001
+                pass
 
             timeline.start("fingerprint", "Building canonical evidence record…")
             self._sync_progress(job_id, timeline, result, phase="fingerprinting")
