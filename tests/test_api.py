@@ -52,7 +52,7 @@ def _with_mocked_search(monkeypatch, results):
     from backend import pipeline
     from backend.pipeline import runner as runner_mod
 
-    def fake_search(image_path, provider="auto"):
+    def fake_search(image_path, provider="auto", precropped=None):
         return SearchResponse(results=results, provider="test")
 
     monkeypatch.setattr(runner_mod, "search_web", fake_search)

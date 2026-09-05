@@ -131,3 +131,9 @@ class CaseDir:
             encoding="utf-8",
         )
         return dest
+
+    def save_crop(self, image: np.ndarray, filename: str = "crop_face.jpg") -> Path:
+        """Save a face-cropped copy of the input image (search artifact)."""
+        dest = self._dir / filename
+        cv2.imwrite(str(dest), image)
+        return dest

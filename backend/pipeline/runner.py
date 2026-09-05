@@ -186,6 +186,37 @@ class PipelineRunner:
         dest.write_bytes(data)
         return str(dest)
 
+    def _crop_for_search(
+        self,
+        image_path: str,
+        face,
+        case_dir: CaseDir,
+    ) -> str:
+        """Crop the input image to the detected face for search providers.
+
+        Respects the ``CROP_TO_FACE`` env toggle (default on). Returns the
+        path of a cropped copy, or the original path when cropping is disabled
+        or unavailable. The crop is persisted to the case dir as an artifact.
+        """
+        import os
+
+        if os.environ.get("CROP_TO_FACE", "").strip().lower() in {
+            "0", "false", "no", "off",
+        }:
+            return image_path
+        if face is None or len(getattr(face, "bbox", []) or []) < 4:
+            return image_path
+        try:
+            from backend.face.crop import crop_to_face
+            from backend.face.model import read_image
+
+            raw_img = read_image(image_path)
+            cropped = crop_to_face(raw_img, face)
+            output = case_dir.save_crop(cropped)
+            return str(output)
+        except Exception:  # noqa: BLE001
+            return image_path
+
     def _cleanup(self, tmpdir: str) -> None:
         if not self.temp_dir and Path(tmpdir).exists():
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -227,6 +258,11 @@ class PipelineRunner:
         except Exception:  # noqa: BLE001
             pass
 
+        # 1c. Crop the image to the detected primary face so reverse-image
+        # providers search the subject rather than the whole photo (reduces
+        # noise from background / group shots). Best effort.
+        search_image = self._crop_for_search(image_path, face, case_dir)
+
         # 2. Reverse search (multi-provider when configured)
         from backend.search.visual_search import PROVIDERS
 
@@ -234,7 +270,7 @@ class PipelineRunner:
         provider_hint = ", ".join(available) if available else "none configured"
         timeline.start("search", f"Querying {len(available)} provider(s): {provider_hint}")
         self._sync_progress(job_id, timeline, result, phase="searching")
-        search = search_web(image_path)
+        search = search_web(search_image, precropped=search_image)
 
         # 2b. Keyless social fallback when keyed providers return nothing
         if not search.has_results and self.hint:

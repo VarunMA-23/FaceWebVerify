@@ -208,13 +208,79 @@ PROVIDERS = [
 ]
 
 
-def search_web(image_path: str, provider: str = "auto") -> SearchResponse:
+def _env_bool(name: str, default: bool = True) -> bool:
+    value = _env(name)
+    if not value:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _crop_file(image_path: str) -> tuple[str, str | None]:
+    """Produce a face-cropped copy of ``image_path`` for search.
+
+    When ``CROP_TO_FACE`` is enabled (default) and a face is detectable,
+    returns ``(cropped_path, cropped_path)`` so reverse-image providers
+    search the face region rather than the whole photo. Falls back to
+    ``(original_path, None)`` when disabled, or when no face is found /
+    cropping fails. The second element is the temp file the caller should
+    delete, or ``None`` when no temp file was created.
+    """
+    if not _env_bool("CROP_TO_FACE", default=True):
+        return image_path, None
+
+    try:
+        import tempfile
+
+        from backend.face.crop import crop_to_primary_face
+
+        cropped = crop_to_primary_face(image_path)
+        if cropped is None:
+            return image_path, None
+        ext = ".png" if image_path.lower().endswith(".png") else ".jpg"
+        fd, tmp = tempfile.mkstemp(prefix="face_crop_", suffix=ext)
+        with os.fdopen(fd, "wb") as fh:
+            import cv2
+
+            ok, buf = cv2.imencode(ext, cropped)
+            if ok:
+                fh.write(buf.tobytes())
+        return tmp, tmp
+    except Exception:  # noqa: BLE001
+        return image_path, None
+
+
+def search_web(
+    image_path: str,
+    provider: str = "auto",
+    precropped: str | None = None,
+) -> SearchResponse:
     """Search the web for matching posts using configured provider(s).
 
     When ``provider`` is ``auto`` and multiple providers are configured,
     runs all providers in parallel and aggregates/deduplicates results.
     With a single provider, runs that provider only.
+
+    Unless ``CROP_TO_FACE`` is disabled (or no face is detected), the image is
+    first cropped to the primary face region so providers search the subject
+    rather than the whole photo. Callers that already cropped (e.g. the
+    pipeline runner) may pass the result via ``precropped`` to skip the crop.
     """
+    temp_path: str | None = None
+    if precropped:
+        image_path = precropped
+    else:
+        image_path, temp_path = _crop_file(image_path)
+    try:
+        return _search_payload(image_path, provider)
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _search_payload(image_path: str, provider: str) -> SearchResponse:
     from backend.evidence.consensus import search_all_providers, to_search_results
 
     if provider != "auto":
