@@ -1,0 +1,3 @@
+# Optional EVM (Web3) anchoring dependencies.
+# Only needed for BLOCKCHAIN_ANCHOR=evm. The core pipeline runs without these.
+web3

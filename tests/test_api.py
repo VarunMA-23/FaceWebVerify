@@ -21,6 +21,28 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 LENA = os.path.join(FIXTURES, "lena.jpg")
 
 
+def _remove_retry(path: str) -> None:
+    """Windows sqlite can keep a short-lived lock handle after close."""
+    import gc
+    import time
+
+    for _ in range(15):
+        gc.collect()
+        try:
+            os.remove(path)
+            return
+        except PermissionError:
+            time.sleep(0.2)
+
+
+def _isolate_state(monkeypatch) -> None:
+    """Point the DB and local chain away from repo/global state."""
+    scratch = tempfile.mkdtemp(prefix="fvw_test_")
+    monkeypatch.setenv("PIPELINE_DB", os.path.join(scratch, "pipeline.db"))
+    monkeypatch.setenv("BLOCKCHAIN_CHAIN_DIR", os.path.join(scratch, "chaindata"))
+    monkeypatch.setenv("BLOCKCHAIN_ANCHOR", "local")
+
+
 @pytest.fixture
 def client(monkeypatch):
     return TestClient(app)
@@ -58,10 +80,8 @@ def test_upload_returns_job_and_background_completes(monkeypatch):
         )
 
         # Use a temp DB so we don't touch the real pipeline.db.
-        tmp_db = os.path.join(tempfile.gettempdir(), "api_test.db")
-        if os.path.exists(tmp_db):
-            os.remove(tmp_db)
-        monkeypatch.setenv("PIPELINE_DB", tmp_db)
+        _isolate_state(monkeypatch)
+        tmp_db = os.environ["PIPELINE_DB"]
 
         client = TestClient(app)
         r = client.post(
@@ -89,13 +109,17 @@ def test_upload_returns_job_and_background_completes(monkeypatch):
         assert res["matched_post"] is not None
         assert res["matched_post"]["evidence_tier"] == "verified"
         assert res["candidates_seen"] == 1
+        # Local Merkle anchoring runs by default.
+        assert res["blockchain"]["backend"] == "local"
+        assert res["blockchain"]["content_hash"]
 
         if os.path.exists(tmp_db):
-            os.remove(tmp_db)
+            _remove_retry(tmp_db)
 
 
 @pytest.mark.skipif(not os.path.exists(LENA), reason="Lena fixture missing")
-def test_verify_endpoint_for_unregistered_job(monkeypatch):
+def test_verify_endpoint_with_local_anchor(monkeypatch):
+    """Local Merkle record is stored by default; /verify reflects it."""
     with ServerScope() as s:
         lena = _post_face_bytes()
         s.router.add(
@@ -107,10 +131,8 @@ def test_verify_endpoint_for_unregistered_job(monkeypatch):
             monkeypatch,
             [SearchResult(url=s.url("/post"), image_url=s.url("/content.jpg"))],
         )
-        tmp_db = os.path.join(tempfile.gettempdir(), "api_verify_test.db")
-        if os.path.exists(tmp_db):
-            os.remove(tmp_db)
-        monkeypatch.setenv("PIPELINE_DB", tmp_db)
+        _isolate_state(monkeypatch)
+        tmp_db = os.environ["PIPELINE_DB"]
 
         client = TestClient(app)
         body = client.post(
@@ -125,12 +147,21 @@ def test_verify_endpoint_for_unregistered_job(monkeypatch):
 
             time.sleep(1)
         v = client.get(f"/search/{job_id}/verify").json()
-        # No blockchain record stored (do_blockchain=False) -> not on chain.
-        assert v["on_chain"] is False
-        assert "No on-chain record" in v["error"]
+        # Default local anchoring stores a record -> on chain by default.
+        assert v["on_chain"] is True
+        assert v["verified"] is True
+        assert v["hash_matches"] is True
+        assert v["backend"] == "local"
+        assert v["content_hash"]
+
+        # Re-verify path (recompute fingerprint + re-run checks on the ledger).
+        rv = client.get(f"/search/{job_id}/reverify").json()
+        assert rv["overall_verified"] is True
+        assert rv["backend"] == "local"
+        assert all(c["ok"] for c in rv["checks"])
 
         if os.path.exists(tmp_db):
-            os.remove(tmp_db)
+            _remove_retry(tmp_db)
 
 
 def test_upload_rejects_bad_content_type(client):

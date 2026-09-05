@@ -67,6 +67,14 @@ _MIGRATIONS = [
     "ALTER TABLE discovered_posts ADD COLUMN metadata_json TEXT DEFAULT ''",
     "ALTER TABLE blockchain_records ADD COLUMN evidence_id TEXT",
     "ALTER TABLE blockchain_records ADD COLUMN record_type TEXT NOT NULL DEFAULT 'content_registration'",
+    "ALTER TABLE blockchain_records ADD COLUMN backend TEXT NOT NULL DEFAULT 'evm'",
+    "ALTER TABLE blockchain_records ADD COLUMN network TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN block_hash TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN merkle_root TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN leaf_index INTEGER",
+    "ALTER TABLE blockchain_records ADD COLUMN idempotent INTEGER DEFAULT 0",
+    "ALTER TABLE blockchain_records ADD COLUMN merkle_proof_json TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN checks_json TEXT DEFAULT ''",
 ]
 
 
@@ -192,17 +200,27 @@ class Database:
         self,
         job_id: str,
         content_hash: str,
-        transaction_hash: str,
-        block_number: int | None,
+        transaction_hash: str = "",
+        block_number: int | None = None,
         evidence_id: str | None = None,
         record_type: str = "content_registration",
+        *,
+        backend: str = "evm",
+        network: str = "",
+        block_hash: str = "",
+        merkle_root: str = "",
+        leaf_index: int | None = None,
+        merkle_proof: list | None = None,
+        idempotent: bool = False,
+        checks: list | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO blockchain_records "
                 "(job_id, content_hash, transaction_hash, block_number, registered_at, "
-                "evidence_id, record_type) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "evidence_id, record_type, backend, network, block_hash, merkle_root, "
+                "leaf_index, idempotent, merkle_proof_json, checks_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id,
                     content_hash,
@@ -211,6 +229,14 @@ class Database:
                     _now(),
                     evidence_id,
                     record_type,
+                    backend,
+                    network,
+                    block_hash,
+                    merkle_root,
+                    leaf_index,
+                    1 if idempotent else 0,
+                    json.dumps(merkle_proof or []),
+                    json.dumps(checks or []),
                 ),
             )
 

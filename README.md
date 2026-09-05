@@ -110,10 +110,14 @@ OPENWEBNINJA_API_KEY=
 SERPAPI_API_KEY=
 TINEYE_API_KEY=
 
-# Blockchain (Sepolia testnet) — optional
+# Blockchain — optional
+# Local hash-linked Merkle ledger is the DEFAULT anchor backend (no config).
+# EVM (Sepolia) is opt-in via BLOCKCHAIN_ANCHOR=evm (requires `pip install -r requirements-evm.txt`):
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 SEPOLIA_WALLET_PRIVATE_KEY=
 SEPOLIA_CONTRACT_ADDRESS=
+# BLOCKCHAIN_ANCHOR=local | evm | none        (default: local)
+# BLOCKCHAIN_DIFFICULTY=0                     (local chain PoW bits, 0 = off)
 ```
 
 > ⚠️ **Never commit `.env`.** It is git-ignored. Your keys stay local.
@@ -146,7 +150,8 @@ python run_pipeline.py myface.jpg
 # Only accept verified (page-content) matches, evaluate 10 candidates
 python run_pipeline.py myface.jpg --limit 10 --evidence-tier verified_only
 
-# Include on-chain registration + verification
+# Include on-chain registration + verification.
+# Anchors to the local Merkle ledger by default; pass --anchor evm to use Sepolia.
 python run_pipeline.py myface.jpg --do-blockchain
 
 # Raise the match threshold

@@ -12,10 +12,14 @@ from pydantic import BaseModel
 
 from backend.api.schemas import (
     BlockchainSummary,
+    ChainShowModel,
+    ChainVerifyModel,
+    CheckModel,
     EvidencePassportModel,
     IndependentEvidenceVerificationModel,
     IntegrityResponseModel,
     PostSummary,
+    ReverifyResponseModel,
     SearchResponseModel,
     SearchSummary,
     TimelineStep,
@@ -27,7 +31,12 @@ from backend.evidence.source import (
     normalize_platform,
     platform_display_name,
 )
+from backend.blockchain.backend import resolve_backend
+from backend.blockchain.config import get_chain_dir, get_difficulty
+from backend.blockchain.errors import BackendUnavailableError, ChainIntegrityError
 from backend.blockchain.integrity import verify_integrity
+from backend.blockchain.localchain import LocalChain
+from backend.blockchain.reverify import reverify_job
 from backend.blockchain.verifier import get_evidence_from_blockchain
 from backend.blockchain.verifier import verify_evidence_on_blockchain
 from backend.blockchain.verifier import verify_on_blockchain
@@ -39,6 +48,7 @@ from backend.blockchain.contract import get_contract_address
 from backend.pipeline.runner import PipelineRunner
 
 router = APIRouter(prefix="/search", tags=["search"])
+chain_router = APIRouter(prefix="/chain", tags=["chain"])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -80,14 +90,22 @@ def verify_independent_evidence(evidence_id: str) -> IndependentEvidenceVerifica
 
 
 def _runner(db: Database | None = None, limit: int = 5, threshold: float = 0.4) -> PipelineRunner:
-    do_bc = os.environ.get("DO_BLOCKCHAIN", "auto").lower()
-    enable = do_bc in ("1", "true", "yes")
-    if do_bc == "auto":
-        enable = bool(
-            os.environ.get("SEPOLIA_WALLET_PRIVATE_KEY", "").strip()
-            and os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "").strip()
-        )
+    do_bc = os.environ.get("DO_BLOCKCHAIN", "true").lower()
+    enable = do_bc not in ("0", "false", "no", "off", "none")
     return PipelineRunner(db or Database(), limit=limit, threshold=threshold, do_blockchain=enable)
+
+
+def _make_local_chain() -> LocalChain:
+    return LocalChain(get_chain_dir() / "local", difficulty_bits=get_difficulty())
+
+
+def _load_checks(bc: dict | None) -> list[dict]:
+    if not bc:
+        return []
+    try:
+        return json.loads(bc.get("checks_json") or "[]")
+    except (ValueError, TypeError):
+        return []
 
 
 def get_db() -> Database:
@@ -217,14 +235,22 @@ def get_search(job_id: str, db: Database = Depends(get_db)) -> SearchResponseMod
     if bc:
         on_chain = False
         try:
-            on_chain = verify_on_blockchain(bc["content_hash"])
-        except (ValueError, ConnectionError):
+            on_chain = verify_on_blockchain(
+                bc["content_hash"],
+                backend_name=bc.get("backend") or "evm",
+            )
+        except (ValueError, ConnectionError, BackendUnavailableError):
             on_chain = False
         blockchain = BlockchainSummary(
             content_hash=bc["content_hash"],
-            tx_hash=bc["transaction_hash"],
+            tx_hash=bc["transaction_hash"] or None,
             block_number=bc["block_number"],
             verified=on_chain,
+            backend=bc.get("backend") or "evm",
+            network=bc.get("network") or "",
+            block_hash=bc.get("block_hash") or "",
+            idempotent=bool(bc.get("idempotent")),
+            checks=_load_checks(bc),
         )
 
     passport_data = meta.get("passport") or {}
@@ -281,17 +307,56 @@ def verify_search(job_id: str, db: Database = Depends(get_db)) -> VerifyResponse
         )
 
     try:
-        on_chain = verify_on_blockchain(bc["content_hash"])
-    except (ValueError, ConnectionError):
+        on_chain = verify_on_blockchain(
+            bc["content_hash"],
+            backend_name=bc.get("backend") or "evm",
+        )
+    except (ValueError, ConnectionError, BackendUnavailableError):
         on_chain = False
 
+    backend_name = bc.get("backend") or "evm"
+    verified = on_chain and (backend_name != "evm" or bool(bc["transaction_hash"]))
     return VerifyResponseModel(
         job_id=job_id,
-        verified=bool(bc["transaction_hash"]) and on_chain,
+        verified=verified,
         on_chain=on_chain,
         hash_matches=on_chain,
         content_hash=bc["content_hash"],
         tx_hash=bc["transaction_hash"],
+        backend=backend_name,
+        network=bc.get("network") or "",
+        block_hash=bc.get("block_hash") or "",
+        idempotent_hit=bool(bc.get("idempotent")),
+        checks=_load_checks(bc),
+        merkle_root=bc.get("merkle_root") or "",
+    )
+
+
+@router.get("/{job_id}/reverify", response_model=ReverifyResponseModel)
+def reverify_search(job_id: str, db: Database = Depends(get_db)) -> ReverifyResponseModel:
+    """Recompute the fingerprint from persisted evidence and re-run all checks."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    try:
+        report = reverify_job(job_id, db)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Re-verification failed: {exc}",
+        ) from exc
+
+    return ReverifyResponseModel(
+        job_id=job_id,
+        overall_verified=report["overall_verified"],
+        attested_hash=report["attested_hash"],
+        current_hash=report["current_hash"],
+        backend=report["backend"],
+        network=report["network"],
+        checks=[
+            CheckModel(**c) for c in report["checks"]
+        ],
     )
 
 
@@ -304,6 +369,18 @@ def revoke_evidence(job_id: str, evidence_id: str, db: Database = Depends(get_db
     evidence_attestation = db.get_evidence_attestation_record(job_id, evidence_id)
     if evidence_attestation is None:
         raise HTTPException(status_code=404, detail="Evidence attestation not found.")
+
+    mode = os.environ.get("BLOCKCHAIN_EVM_MODE", "registry").lower()
+    if mode not in ("registry", "calldata"):
+        mode = "registry" if os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "") else "calldata"
+    if mode != "registry":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Evidence revocation requires EVM registry mode "
+                "(BLOCKCHAIN_EVM_MODE=registry with a deployed contract)."
+            ),
+        )
 
     content_hash = evidence_attestation["content_hash"]
     try:
@@ -367,13 +444,14 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
     meta = db.get_job_metadata(job_id)
     passport = meta.get("passport") or {}
     bc = db.get_blockchain_record(job_id)
+    backend_name = (bc or {}).get("backend") or "auto"
     attested = (bc or {}).get("content_hash") or passport.get("content_hash") or ""
 
     on_chain = False
     if attested:
         try:
-            on_chain = verify_on_blockchain(attested)
-        except (ValueError, ConnectionError):
+            on_chain = verify_on_blockchain(attested, backend_name=backend_name)
+        except (ValueError, ConnectionError, BackendUnavailableError):
             on_chain = False
 
     # Recompute from the persisted structured evidence record when available.
@@ -418,7 +496,7 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
                 evidence_id,
                 evidence_content_hash,
             )
-        except (ValueError, ConnectionError):
+        except (ValueError, ConnectionError, BackendUnavailableError):
             evidence_on_chain = False
         evidence_hash_matches_current = bool(current_hash) and (
             evidence_content_hash.lower() == current_hash.lower()
@@ -433,7 +511,7 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
         })
         try:
             on_chain_evidence = get_evidence_from_blockchain(evidence_id)
-        except (ValueError, ConnectionError):
+        except (ValueError, ConnectionError, BackendUnavailableError):
             on_chain_evidence = None
         if on_chain_evidence:
             details.update(
@@ -480,8 +558,43 @@ def export_evidence(job_id: str, db: Database = Depends(get_db)) -> dict:
     if bc:
         export["blockchain"] = {
             "content_hash": bc.get("content_hash"),
+            "backend": bc.get("backend") or "evm",
             "transaction_hash": bc.get("transaction_hash"),
             "block_number": bc.get("block_number"),
-            "network": "Ethereum Sepolia",
+            "network": bc.get("network") or "",
         }
     return export
+
+
+@chain_router.get("/show", response_model=ChainShowModel)
+def chain_show() -> ChainShowModel:
+    """Render the local Merkle chain (block-by-block) for inspection."""
+    chain = _make_local_chain()
+    blocks = [
+        {
+            "index": b["index"],
+            "hash": b["hash"],
+            "prev_hash": b.get("prev_hash", ""),
+            "timestamp": b.get("timestamp", ""),
+            "merkle_root": b.get("merkle_root", ""),
+            "difficulty": int(b.get("difficulty", 0)),
+            "records": list(b.get("records", [])),
+        }
+        for b in chain.blocks()
+    ]
+    return ChainShowModel(
+        chain_dir=str(chain.path),
+        network=chain.network,
+        blocks=blocks,
+    )
+
+
+@chain_router.get("/verify", response_model=ChainVerifyModel)
+def chain_verify() -> ChainVerifyModel:
+    """Verify the local Merkle chain from genesis to head."""
+    chain = _make_local_chain()
+    try:
+        chain.verify_chain()
+    except (ChainIntegrityError, OSError, ValueError) as exc:
+        return ChainVerifyModel(ok=False, detail=f"CHAIN INTEGRITY: FAILED -- {exc}")
+    return ChainVerifyModel(ok=True, detail="CHAIN INTEGRITY: OK")

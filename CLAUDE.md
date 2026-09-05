@@ -170,34 +170,45 @@ fingerprint(content) → str  # SHA-256 hex string
 
 ### Module 7 — Blockchain Registry
 
-**Function**: Write content hash to blockchain.
+**Function**: Anchor the content hash and return a proof receipt.
 
 ```python
-register_on_blockchain(content_hash) → str  # transaction hash
+anchor(content_hash) → AnchorReceipt
+# AnchorReceipt = { backend, network, record_hash, idempotent_hit, ref, block_index, block_hash, merkle_root, leaf_index, merkle_proof }
 ```
 
-- Solidity contract `ContentRegistry.sol`:
-  ```solidity
-  mapping(bytes32 => bool) public registered;
-  function register(bytes32 contentHash) external;
-  function verify(bytes32 contentHash) external view returns (bool);
-  ```
-- Use Sepolia testnet (free, no real ETH needed)
-- Fund wallet via Sepolia faucet
-- Use web3.py to interact
-- Store: `tx_hash`, `block_number`, `job_id`
+**Dual-backend design (local default, EVM optional):**
+- **`local` (DEFAULT)** — `backend/blockchain/localchain.py`: an append-only, hash-linked
+  Merkle ledger on disk (`chaindata/local/blocks.jsonl`). Genesis is deterministic;
+  each block commits to its record via a Merkle root; optional PoW; `verify_chain`
+  re-hashes the whole ledger and pinpoints the first broken block. Requires no keys,
+  network, or web3.
+- **`evm` (OPTIONAL)** — `backend/blockchain/evm.py` via web3.py on Sepolia:
+  - *registry* mode: `anchorIfAbsent(bytes32)` on `ContentRegistry.sol`
+    (idempotent at the contract level; re-verification reads `recordBlock`).
+  - *calldata* mode: a 0-value self-transaction with `b"FCV1" || hash` payload.
+  - A local `evm-<chainid>.index.json` index cache makes repeated anchors a
+    gas-free no-op.
+- Selection: `BLOCKCHAIN_ANCHOR=local|evm|none|auto` (default `local`).
+- Master kill-switch: `DO_BLOCKCHAIN=0|false|no|off|none` disables anchoring.
+- web3 is imported lazily; the core pipeline runs without it
+  (`pip install -r requirements-evm.txt` to enable EVM).
 
----
+The blockchain layer keeps the evidence subsystem (registerEvidence /
+revokeEvidence) for `/evidence/*` (EVM registry mode).
 
 ### Module 8 — Verification
 
 **Function**: Verify content hash exists on blockchain.
 
 ```python
-verify_on_blockchain(content_hash) → bool
+verify_on_blockchain(content_hash, backend_name="auto") → bool
+# verify_record(content_hash, receipt) → list[Check]  (per-check PASS/FAIL)
+# reverify_job(job_id, db) → per-check report recomputing the fingerprint
 ```
 
-- Call `registered[content_hash]` on contract
+- Calls `registered[content_hash]` on the contract (EVM) or `LocalChain.verify()`
+  (local Merkle ledger).
 - Return `True` if exists, `False` otherwise
 - **Tampering demo**: Modify content → re-hash → verify fails
 
@@ -294,8 +305,10 @@ python -m pytest tests/test_blockchain.py -v
 1. **Face model chosen**: InsightFace buffalo_l (or alternative)
 2. **Visual search method**: [TBD — evaluate options in Phase 2]
 3. **Similarity threshold**: 0.4 (document validation approach)
-4. **Blockchain network**: Sepolia testnet
-5. **Contract address**: [paste after deployment]
+4. **Anchor backend**: local Merkle ledger by default (`BLOCKCHAIN_ANCHOR=local`);
+   EVM (Sepolia) optional via `requirements-evm.txt` + `BLOCKCHAIN_ANCHOR=evm`
+5. **Chain data**: `chaindata/` (git-ignored); EVM index cache `evm-<chainid>.index.json`
+6. **Contract address**: [paste after deployment]
 
 ---
 
@@ -310,10 +323,13 @@ onnxruntime
 numpy
 requests
 beautifulsoup4
-web3
 python-multipart
 pytest
+python-dotenv
+httpx
 ```
+
+EVM anchoring only (optional): `pip install -r requirements-evm.txt` → `web3`
 
 ---
 

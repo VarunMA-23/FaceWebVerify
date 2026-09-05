@@ -43,10 +43,14 @@ class PostSummary(BaseModel):
 
 class BlockchainSummary(BaseModel):
     content_hash: str = ""
-    tx_hash: str = ""
+    tx_hash: Optional[str] = None
     block_number: Optional[int] = None
     verified: bool = False
-    network: str = "Ethereum Sepolia"
+    network: str = ""
+    backend: str = ""
+    block_hash: str = ""
+    idempotent: bool = False
+    checks: list[dict] = Field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -124,7 +128,52 @@ class VerifyResponseModel(BaseModel):
     hash_matches: bool = False
     content_hash: Optional[str] = None
     tx_hash: Optional[str] = None
+    backend: str = ""
+    network: str = ""
+    block_hash: str = ""
+    idempotent_hit: bool = False
+    checks: list[dict] = Field(default_factory=list)
+    merkle_root: str = ""
     error: Optional[str] = None
+
+
+class CheckModel(BaseModel):
+    name: str
+    ok: bool
+    detail: str = ""
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+
+
+class ReverifyResponseModel(BaseModel):
+    job_id: str
+    overall_verified: bool = False
+    attested_hash: str = ""
+    current_hash: str = ""
+    backend: str = ""
+    network: str = ""
+    checks: list[CheckModel] = Field(default_factory=list)
+
+
+class ChainBlockModel(BaseModel):
+    index: int
+    hash: str
+    prev_hash: str = ""
+    timestamp: str = ""
+    merkle_root: str = ""
+    difficulty: int = 0
+    records: list[str] = Field(default_factory=list)
+
+
+class ChainShowModel(BaseModel):
+    chain_dir: str = ""
+    network: str = ""
+    blocks: list[ChainBlockModel] = Field(default_factory=list)
+
+
+class ChainVerifyModel(BaseModel):
+    ok: bool = False
+    detail: str = ""
 
 
 class IndependentEvidenceVerificationModel(BaseModel):

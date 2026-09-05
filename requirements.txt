@@ -6,8 +6,7 @@ onnxruntime
 numpy
 requests
 beautifulsoup4
-web3
 python-multipart
 pytest
 python-dotenv
-httpx2
+httpx

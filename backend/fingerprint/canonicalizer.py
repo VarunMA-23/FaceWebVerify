@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from backend.fingerprint.canonical import to_ppm
+
 SCHEMA_VERSION = "1.0"
 LEGACY_SCHEMA_VERSION = "1"
 
@@ -76,6 +78,8 @@ class EvidenceRecord:
     verification_reasons: list[str] = field(default_factory=list)
 
     def canonical_dict(self) -> dict:
+        """Hash-ready dict. Similarities are emitted as integer parts-per-million
+        so the serialized bytes are identical on every machine.``"""
         d: dict = {
             "schema_version": self.schema_version,
             "evidence_id": (self.evidence_id or "").strip(),
@@ -84,7 +88,7 @@ class EvidenceRecord:
             "platform": (self.platform or "").strip(),
             "source_type": (self.source_type or "").strip(),
             "discovered_at": (self.discovered_at or "").strip(),
-            "face_similarity": round(float(self.face_similarity), 6),
+            "face_similarity_ppm": to_ppm(self.face_similarity),
             "evidence_tier": (self.evidence_tier or "").strip(),
             "image_sha256": (self.image_sha256 or "").strip(),
             "caption": (self.caption or "").strip(),
@@ -95,7 +99,7 @@ class EvidenceRecord:
             "verification_reasons": sorted(self.verification_reasons),
         }
         if self.image_similarity is not None:
-            d["image_similarity"] = round(float(self.image_similarity), 6)
+            d["image_similarity_ppm"] = to_ppm(self.image_similarity)
         return d
 
     def canonical_json(self, sort_keys: bool = True) -> str:
@@ -105,6 +109,37 @@ class EvidenceRecord:
             separators=(",", ":"),
             ensure_ascii=False,
         )
+
+    def display_dict(self) -> dict:
+        """Display/DB dict mirroring the dataclass fields (floats kept as-is).
+
+        This is what gets persisted in the passport's ``evidence_record`` so it
+        can be rehydrated with ``EvidenceRecord(**…)`` and re-hashed via
+        :meth:`canonical_dict`.
+        """
+        return {
+            "schema_version": self.schema_version,
+            "evidence_id": self.evidence_id,
+            "source_url": self.source_url,
+            "canonical_url": self.canonical_url,
+            "platform": self.platform,
+            "source_type": self.source_type,
+            "discovered_at": self.discovered_at,
+            "face_similarity": float(self.face_similarity),
+            "image_similarity": (
+                float(self.image_similarity)
+                if self.image_similarity is not None
+                else None
+            ),
+            "evidence_tier": self.evidence_tier,
+            "image_sha256": self.image_sha256,
+            "caption": self.caption,
+            "title": self.title,
+            "providers": sorted(self.providers),
+            "provider_consensus": self.provider_consensus,
+            "evidence_score": int(self.evidence_score),
+            "verification_reasons": sorted(self.verification_reasons),
+        }
 
 
 def image_sha256(image_bytes: bytes) -> str:

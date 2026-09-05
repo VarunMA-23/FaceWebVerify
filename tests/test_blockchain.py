@@ -69,9 +69,55 @@ def test_tampering_demo():
 
 
 def test_register_requires_private_key(content_hash):
-    """Without a configured private key, register must raise a clear error."""
+    """EVM evidence registration without a configured key must raise clearly."""
+    from backend.blockchain.registry import register_evidence_on_blockchain
+
     with pytest.raises(ValueError, match="private key"):
-        register_on_blockchain(content_hash)
+        register_evidence_on_blockchain("ev-1", content_hash)
+
+
+def test_register_on_null_backend_returns_dict(content_hash, monkeypatch, tmp_path):
+    """The generic register surface resolves the backend and returns a dict."""
+    from backend.blockchain.registry import register_on_blockchain
+
+    monkeypatch.setenv("BLOCKCHAIN_ANCHOR", "local")
+    monkeypatch.setenv("BLOCKCHAIN_CHAIN_DIR", str(tmp_path))
+    receipt_dict = register_on_blockchain(content_hash)
+    assert receipt_dict["backend"] == "local"
+    assert receipt_dict["record_hash"] == content_hash
+    assert receipt_dict["block_number"] > 0
+    assert isinstance(receipt_dict["merkle_root"], str) and len(receipt_dict["merkle_root"]) == 64
+
+
+def test_local_chain_and_verify(content_hash, monkeypatch, tmp_path):
+    """Local Merkle ledger: anchor -> idempotent -> verify -> tamper detected."""
+    from backend.blockchain.localchain import LocalChain
+    from backend.blockchain.verifier import verify_on_blockchain, verify_record
+
+    monkeypatch.setenv("BLOCKCHAIN_CHAIN_DIR", str(tmp_path))
+    chain = LocalChain(tmp_path / "local", difficulty_bits=0)
+    receipt = chain.anchor(content_hash)
+    assert receipt.backend == "local"
+    assert receipt.block_index == 1  # genesis + one record block
+
+    repeat = chain.anchor(content_hash)
+    assert repeat.idempotent_hit is True
+    assert repeat.block_index == receipt.block_index
+
+    assert verify_on_blockchain(content_hash, backend_name="local") is True
+    assert all(c.ok for c in verify_record(content_hash, receipt))
+
+    # Tampering with the ledger is detected by structural verification.
+    import json
+
+    ledger = chain.path
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    bad = json.loads(lines[-1])
+    bad["records"] = [hashlib.sha256(b"tampered").hexdigest()]
+    lines[-1] = json.dumps(bad, sort_keys=True, separators=(",", ":"))
+    ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert verify_on_blockchain(content_hash, backend_name="local") is False
+    assert not all(c.ok for c in verify_record(content_hash, receipt))
 
 
 @pytest.mark.skipif(
@@ -81,7 +127,10 @@ def test_register_requires_private_key(content_hash):
 )
 def test_live_sepolia_register_and_verify(content_hash):
     """Full integration against Sepolia (funded wallet required)."""
-    tx_hash, block_number = register_on_blockchain(content_hash)
-    assert tx_hash.startswith("0x")
-    assert isinstance(block_number, int) and block_number > 0
+    from backend.blockchain.registry import register_on_blockchain
+
+    receipt_dict = register_on_blockchain(content_hash, anchor="evm")
+    assert receipt_dict["backend"] == "evm"
+    assert (receipt_dict["tx_hash"] or "").startswith("0x")
+    assert isinstance(receipt_dict["block_number"], int) and receipt_dict["block_number"] > 0
     assert verify_on_blockchain(content_hash) is True

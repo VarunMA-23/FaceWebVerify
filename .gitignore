@@ -13,6 +13,9 @@ venv/
 *.db
 *.sqlite3
 
+# Local Merkle chain data
+chaindata/
+
 # Uploads / temp artifacts
 uploads/
 data/

@@ -44,7 +44,7 @@ from backend.output import CaseDir
 from backend.search.social import social_search
 from backend.search.visual_search import search_web
 from backend.matching.service import MatcherService
-from backend.fingerprint.canonicalizer import ContentRecord, image_sha256_from_file
+from backend.fingerprint.canonicalizer import EvidenceRecord, image_sha256_from_file
 from backend.fingerprint.hasher import fingerprint
 
 STAGES = 6
@@ -79,6 +79,24 @@ def main() -> int:
     )
     ap.add_argument("--do-blockchain", action="store_true", default=None)
     ap.add_argument("--no-blockchain", action="store_true")
+    ap.add_argument(
+        "--anchor",
+        choices=("auto", "local", "evm", "none"),
+        default="",
+        help="anchor backend: local Merkle ledger, EVM chain, auto, or none",
+    )
+    ap.add_argument(
+        "--chain-dir",
+        default="",
+        help="chain data directory (default: BLOCKCHAIN_CHAIN_DIR or ./chaindata)",
+    )
+    ap.add_argument(
+        "--difficulty",
+        type=int,
+        default=-1,
+        help="PoW difficulty bits for the local chain (default: config, 0=off)",
+    )
+    ap.add_argument("--verify", action="store_true", help="also re-verify the digest after anchoring")
     args = ap.parse_args()
 
     case_dir = CaseDir()
@@ -164,13 +182,18 @@ def main() -> int:
         fail("no local image available to hash; aborting")
         return 3
     img_sha = image_sha256_from_file(local)
-    record = ContentRecord(
-        post_url=best.page_url,
+    record = EvidenceRecord(
+        evidence_id=f"cli-{img_sha[:16]}",
+        source_url=best.page_url,
+        canonical_url=best.page_url,
+        platform=best.platform,
+        source_type="cli",
+        face_similarity=best.score,
+        image_similarity=best.image_similarity,
+        evidence_tier=best.tier.value,
         image_sha256=img_sha,
         caption=best.caption,
-        platform=best.platform,
         title=best.title,
-        evidence=best.tier.value,
     )
     content_hash = fingerprint(record)
     kv("evidence tier", best.tier.value)
@@ -197,18 +220,60 @@ def main() -> int:
     do_bc = not args.no_blockchain
     if args.do_blockchain is not None:
         do_bc = args.do_blockchain
+    if args.anchor == "none":
+        do_bc = False
     stage(6, STAGES, "BLOCKCHAIN  " + ("(enabled)" if do_bc else "(skipped)"))
     if do_bc:
-        from backend.blockchain.registry import register_on_blockchain
+        import os
+
+        if args.anchor:
+            os.environ["BLOCKCHAIN_ANCHOR"] = args.anchor
+        if args.chain_dir:
+            os.environ["BLOCKCHAIN_CHAIN_DIR"] = args.chain_dir
+        if args.difficulty >= 0:
+            os.environ["BLOCKCHAIN_DIFFICULTY"] = str(args.difficulty)
+
+        from backend.blockchain.backend import resolve_backend
+        from backend.blockchain.checks import checks_to_dicts
         from backend.blockchain.verifier import verify_on_blockchain
 
         try:
-            tx_hash, block = register_on_blockchain(content_hash)
-            kv("tx hash", str(tx_hash)[:20] + "…")
-            kv("block", str(block))
-            verified = verify_on_blockchain(content_hash)
+            backend = resolve_backend()
+            receipt = backend.anchor(content_hash)
+            kv("backend", receipt.backend)
+            kv("network", receipt.network or "local-merkle-chain")
+            if receipt.ref.get("tx_hash"):
+                kv("tx hash", str(receipt.ref["tx_hash"])[:20] + "…")
+            if receipt.block_hash:
+                kv("block hash", receipt.block_hash[:20] + "…")
+            kv("block", str(receipt.block_index or ""))
+            kv("merkle root", (receipt.merkle_root or "")[:20] + "…")
+            kv("idempotent", str(receipt.idempotent_hit))
+            verified = verify_on_blockchain(content_hash, backend_name=receipt.backend)
             kv("on-chain verify", str(verified))
-            ok("digest anchored on chain")
+            ok(f"digest anchored on {receipt.backend}")
+            if args.verify:
+                from backend.blockchain.verifier import verify_record
+
+                checks = verify_record(content_hash, receipt)
+                for c in checks:
+                    kv(c.name, "PASS" if c.ok else f"FAIL  {c.detail}")
+                print("  " + ("ALL CHECKS PASS" if all(c.ok for c in checks) else "CHECK FAILURES"))
+                try:
+                    case_dir.save_receipt(
+                        {
+                            "content_hash": content_hash,
+                            "backend": receipt.backend,
+                            "network": receipt.network,
+                            "block_hash": receipt.block_hash,
+                            "block_number": receipt.block_index,
+                            "merkle_root": receipt.merkle_root,
+                            "idempotent": receipt.idempotent_hit,
+                            "checks": checks_to_dicts(checks),
+                        }
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         except (ValueError, ConnectionError) as exc:
             fail(str(exc))
     else:

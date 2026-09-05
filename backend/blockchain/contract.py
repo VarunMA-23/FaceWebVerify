@@ -1,16 +1,22 @@
-"""ABI and web3 connection for the ContentRegistry contract."""
+"""ABI and web3 connection for the ContentRegistry contract.
+
+web3 is an OPTIONAL dependency: it is imported lazily, only on call paths that
+actually talk to an EVM chain (never in the web3-free core path). All pure
+helpers (hash conversion, validation) work without web3 installed.
+"""
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from dotenv import load_dotenv
-from web3 import Web3
-
-load_dotenv()
+from backend.blockchain.config import (
+    get_contract_address,
+    get_private_key,
+    get_rpc_url,
+)
 
 CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
+    # --- events ---
     {
         "anonymous": False,
         "inputs": [
@@ -20,6 +26,73 @@ CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
         ],
         "name": "ContentRegistered",
         "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "bytes32", "name": "recordHash", "type": "bytes32"},
+            {"indexed": True, "internalType": "address", "name": "submitter", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
+        ],
+        "name": "Anchored",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "bytes32", "name": "evidenceId", "type": "bytes32"},
+            {"indexed": True, "internalType": "bytes32", "name": "contentHash", "type": "bytes32"},
+            {"indexed": True, "internalType": "address", "name": "registrar", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
+        ],
+        "name": "EvidenceRegistered",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "bytes32", "name": "evidenceId", "type": "bytes32"},
+            {"indexed": True, "internalType": "address", "name": "revoker", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
+        ],
+        "name": "EvidenceRevoked",
+        "type": "event",
+    },
+    # --- functions ---
+    {
+        "inputs": [{"internalType": "bytes32", "name": "recordHash", "type": "bytes32"}],
+        "name": "anchor",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "recordHash", "type": "bytes32"}],
+        "name": "anchorIfAbsent",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "recordHash", "type": "bytes32"}],
+        "name": "isAnchored",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "recordHash", "type": "bytes32"}],
+        "name": "recordBlock",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "recordHash", "type": "bytes32"}],
+        "name": "recordTimestamp",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
     },
     {
         "inputs": [{"internalType": "bytes32", "name": "contentHash", "type": "bytes32"}],
@@ -61,6 +134,13 @@ CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
     },
     {
         "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "name": "registeredBlock",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
         "name": "evidenceContentHash",
         "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
         "stateMutability": "view",
@@ -88,31 +168,29 @@ CONTENT_REGISTRY_ABI: list[dict[str, Any]] = [
 ]
 
 
-def get_rpc_url() -> str:
-    return os.environ.get(
-        "SEPOLIA_RPC_URL",
-        "https://ethereum-sepolia-rpc.publicnode.com",
-    ).strip()
+def get_web3(rpc_url: str | None = None):
+    """Return a connected Web3 instance (lazy web3 import)."""
+    from backend.blockchain.errors import BackendUnavailableError
 
+    try:
+        from web3 import Web3
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "web3 is not installed; run: pip install -r requirements-evm.txt"
+        ) from exc
 
-def get_private_key() -> str:
-    return os.environ.get("SEPOLIA_WALLET_PRIVATE_KEY", "").strip()
-
-
-def get_contract_address() -> str:
-    return os.environ.get("SEPOLIA_CONTRACT_ADDRESS", "").strip()
-
-
-def get_web3(rpc_url: str | None = None) -> Web3:
-    provider = Web3.HTTPProvider(rpc_url or get_rpc_url())
+    url = rpc_url or get_rpc_url()
+    provider = Web3.HTTPProvider(url)
     w3 = Web3(provider)
     if not w3.is_connected():
-        raise ConnectionError(f"Could not connect to RPC: {rpc_url or get_rpc_url()}")
+        raise ConnectionError(f"Could not connect to RPC: {url}")
     return w3
 
 
-def get_contract(w3: Web3 | None = None, address: str | None = None):
+def get_contract(w3=None, address: str | None = None):
     """Return a web3 contract instance for ContentRegistry."""
+    from web3 import Web3
+
     addr = address or get_contract_address()
     if not addr:
         raise ValueError("Contract address not configured (SEPOLIA_CONTRACT_ADDRESS)")
@@ -132,4 +210,24 @@ def evidence_id_to_bytes32(evidence_id: str) -> bytes:
     """Convert an application evidence ID to an Ethereum bytes32 value."""
     if not isinstance(evidence_id, str) or not evidence_id:
         raise ValueError("Evidence ID must be a non-empty string")
+    try:
+        from web3 import Web3
+    except ImportError as exc:
+        from backend.blockchain.errors import BackendUnavailableError
+
+        raise BackendUnavailableError(
+            "web3 is not installed; run: pip install -r requirements-evm.txt"
+        ) from exc
     return bytes(Web3.keccak(text=evidence_id))
+
+
+__all__ = [
+    "CONTENT_REGISTRY_ABI",
+    "get_web3",
+    "get_contract",
+    "hash_to_bytes32",
+    "evidence_id_to_bytes32",
+    "get_rpc_url",
+    "get_private_key",
+    "get_contract_address",
+]

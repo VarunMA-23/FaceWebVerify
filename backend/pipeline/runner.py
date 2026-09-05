@@ -396,20 +396,28 @@ class PipelineRunner:
             result.passport["evidence_record"] = evidence_record
 
             if self.do_blockchain:
-                timeline.start("blockchain", "Registering on Ethereum Sepolia…")
+                timeline.start("blockchain", "Anchoring evidence digest…")
                 self._sync_progress(job_id, timeline, result, phase="blockchain")
                 result.blockchain = self._register(
                     job_id,
                     best.content_hash,
                     result.passport["evidence_record"]["evidence_id"],
                 )
-                if result.blockchain.get("tx_hash"):
-                    passport.tx_hash = result.blockchain["tx_hash"]
+                if result.blockchain.get("content_hash"):
+                    passport.blockchain_network = (
+                        result.blockchain.get("network")
+                        or result.blockchain.get("backend")
+                        or "local-merkle-chain"
+                    )
+                    passport.tx_hash = result.blockchain.get("tx_hash") or ""
                     passport.block_number = result.blockchain.get("block_number")
-                    passport.blockchain_network = "Ethereum Sepolia"
                     passport.registered_at = result.blockchain.get("registered_at", "")
                     passport.integrity_status = "attested"
-                    timeline.succeed("blockchain", result.blockchain["tx_hash"][:16] + "…")
+                    timeline.succeed(
+                        "blockchain",
+                        f"{result.blockchain.get('backend')} · "
+                        f"{best.content_hash[:16]}…",
+                    )
                     try:
                         case_dir.save_receipt(result.blockchain)
                     except Exception:  # noqa: BLE001
@@ -424,6 +432,11 @@ class PipelineRunner:
                 passport.integrity_status = "fingerprinted"
 
             result.passport = passport.to_dict()
+            # Restore the rich evidence bundle (canonical_json / image_sha256 /
+            # evidence_record) that isn't part of the passport dataclass.
+            result.passport["canonical_json"] = canonical_json
+            result.passport["image_sha256"] = best.image_sha256
+            result.passport["evidence_record"] = evidence_record
         else:
             result.best = None
             timeline.warn("select", "No candidates met match threshold")
@@ -626,39 +639,69 @@ class PipelineRunner:
             verification_reasons=c.explanation,
         )
         content_hash = fingerprint(record)
-        return content_hash, img_sha, record.canonical_json(), evidence_id, record.canonical_dict()
+        return content_hash, img_sha, record.canonical_json(), evidence_id, record.display_dict()
 
     def _register(self, job_id: str, content_hash: str, evidence_id: str) -> dict:
-        from backend.blockchain.registry import (
-            register_evidence_on_blockchain,
-            register_on_blockchain,
-        )
-        from backend.blockchain.verifier import verify_on_blockchain
+        """Anchor the content hash on the active backend and persist records."""
+        from dataclasses import asdict
+        from datetime import datetime, timezone
+
+        from backend.blockchain.backend import resolve_backend
+        from backend.blockchain.checks import checks_to_dicts
+        from backend.blockchain.verifier import verify_record
 
         try:
-            tx_hash, block = register_on_blockchain(content_hash)
-            self.db.add_blockchain_record(job_id, content_hash, tx_hash, block)
-            register_evidence_tx_hash, register_evidence_block = register_evidence_on_blockchain(
-                evidence_id,
-                content_hash,
-            )
+            backend = resolve_backend()
+            receipt = backend.anchor(content_hash)
+            ref = dict(receipt.ref or {})
+            checks = verify_record(content_hash, receipt)
+            verified = bool(checks) and all(c.ok for c in checks)
+
             self.db.add_blockchain_record(
                 job_id,
                 content_hash,
-                register_evidence_tx_hash,
-                register_evidence_block,
-                evidence_id=evidence_id,
-                record_type="evidence_attestation",
+                transaction_hash=ref.get("tx_hash") or "",
+                block_number=receipt.block_index,
+                backend=receipt.backend,
+                network=receipt.network,
+                block_hash=receipt.block_hash,
+                merkle_root=receipt.merkle_root,
+                leaf_index=receipt.leaf_index,
+                merkle_proof=[asdict(s) for s in receipt.merkle_proof],
+                idempotent=receipt.idempotent_hit,
+                checks=checks_to_dicts(checks),
             )
-            verified = verify_on_blockchain(content_hash)
+
+            # EVM registry mode additionally attests the evidence mapping on-chain.
+            if receipt.backend == "evm" and ref.get("mode") == "registry":
+                from backend.blockchain.registry import register_evidence_on_blockchain
+
+                ev_tx_hash, ev_block = register_evidence_on_blockchain(
+                    evidence_id, content_hash
+                )
+                self.db.add_blockchain_record(
+                    job_id,
+                    content_hash,
+                    ev_tx_hash,
+                    ev_block,
+                    evidence_id=evidence_id,
+                    record_type="evidence_attestation",
+                    backend=receipt.backend,
+                    network=receipt.network,
+                )
+
             return {
                 "content_hash": content_hash,
-                "tx_hash": tx_hash,
-                "block_number": block,
+                "backend": receipt.backend,
+                "network": receipt.network,
+                "tx_hash": ref.get("tx_hash"),
+                "block_hash": receipt.block_hash,
+                "block_number": receipt.block_index,
+                "merkle_root": receipt.merkle_root,
+                "idempotent": receipt.idempotent_hit,
                 "verified": verified,
-                "registered_at": __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc
-                ).isoformat(),
+                "checks": checks_to_dicts(checks),
+                "registered_at": datetime.now(timezone.utc).isoformat(),
             }
         except (ValueError, ConnectionError) as exc:
             return {"error": str(exc)}

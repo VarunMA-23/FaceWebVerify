@@ -19,7 +19,7 @@ load_dotenv()
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api.routes import router, verify_independent_evidence
+from backend.api.routes import chain_router, router, verify_independent_evidence
 from backend.api.schemas import IndependentEvidenceVerificationModel
 
 evidence_router = APIRouter(prefix="/evidence", tags=["evidence"])
@@ -52,6 +52,7 @@ app.add_middleware(
 # API routes (registered before the static mount so they take precedence).
 app.include_router(router)
 app.include_router(evidence_router)
+app.include_router(chain_router)
 
 
 @app.get("/api/health")
