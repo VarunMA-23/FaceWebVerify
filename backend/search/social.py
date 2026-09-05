@@ -334,25 +334,35 @@ def social_search(
     provider_errors: dict[str, str] = {}
     sources_used: list[str] = []
 
-    for name, fn in (
-        ("bluesky", _search_bluesky),
-        ("mastodon", _search_mastodon),
-        ("reddit", _search_reddit),
-    ):
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run_source(name: str, fn) -> tuple[str, list[SearchResult], dict]:
         try:
             source_results, stats = fn(hint, per_source)
         except Exception as exc:  # noqa: BLE001
-            provider_errors[name] = str(exc)[:160]
-            continue
+            return name, [], {"error": str(exc)[:160]}
         if stats.get("error"):
-            provider_errors[name] = stats["error"]
-            continue
-        sources_used.append(name)
-        for sr in source_results:
-            canonical = sr.url.rstrip("/")
-            if canonical and canonical not in seen:
-                seen.add(canonical)
-                merged.append(sr)
+            return name, [], {"error": stats["error"]}
+        return name, source_results, {}
+
+    sources = (
+        ("bluesky", _search_bluesky),
+        ("mastodon", _search_mastodon),
+        ("reddit", _search_reddit),
+    )
+    with ThreadPoolExecutor(max_workers=min(len(sources), 3)) as pool:
+        futures = [pool.submit(_run_source, name, fn) for name, fn in sources]
+        for fut in futures:
+            name, source_results, stats = fut.result()
+            if stats.get("error"):
+                provider_errors[name] = stats["error"]
+                continue
+            sources_used.append(name)
+            for sr in source_results:
+                canonical = sr.url.rstrip("/")
+                if canonical and canonical not in seen:
+                    seen.add(canonical)
+                    merged.append(sr)
 
     # Sort: social posts first, then everything else
     merged.sort(key=lambda r: (not _is_social(r.url),))

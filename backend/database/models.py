@@ -196,6 +196,45 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def add_posts(self, job_id: str, posts: list[dict]) -> None:
+        """Insert many posts in a single transaction.
+
+        ``posts`` items are dicts with the same keys accepted by
+        :meth:`add_post` (minus ``job_id``). Batching avoids opening a fresh
+        connection and committing once per candidate.
+        """
+        if not posts:
+            return
+        sql = (
+            "INSERT INTO discovered_posts "
+            "(job_id, post_url, image_url, platform, caption, title, "
+            "face_similarity, evidence_tier, source_type, domain, evidence_score, "
+            "provider_count, providers_json, explanation_json, metadata_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        rows = [
+            (
+                job_id,
+                p["post_url"],
+                p["image_url"],
+                p["platform"],
+                p["caption"],
+                p["title"],
+                p["face_similarity"],
+                p["evidence_tier"],
+                p.get("source_type", ""),
+                p.get("domain", ""),
+                p.get("evidence_score", 0),
+                p.get("provider_count", 0),
+                json.dumps(p.get("providers") or []),
+                json.dumps(p.get("explanation") or []),
+                json.dumps(p.get("metadata") or {}),
+            )
+            for p in posts
+        ]
+        with self._connect() as conn:
+            conn.executemany(sql, rows)
+
     # ------------------------------------------------- blockchain
     def add_blockchain_record(
         self,

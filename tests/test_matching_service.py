@@ -13,6 +13,7 @@ from backend.face.embedder import embed_face  # noqa: E402
 from backend.face.matcher import EvidenceTier, best_of, match_image_to_embedding  # noqa: E402
 from backend.matching.service import (  # noqa: E402
     MatcherService,
+    _same_image_file,
     adapt_candidate_limit,
     match_reference_to_search_results,
 )
@@ -204,3 +205,20 @@ def test_match_candidates_parallel_returns_results_in_input_order():
         assert evid[0].is_match is True and evid[0].tier == EvidenceTier.VERIFIED
         assert evid[1].is_match is True and evid[1].tier == EvidenceTier.VERIFIED
         assert evid[2].is_match is False
+
+
+# -------------------------------------------------------------- dedup helper
+
+
+def test_same_image_file_identical_and_different(tmp_path):
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+    c = tmp_path / "c.jpg"
+    a.write_bytes(b"identical-bytes")
+    b.write_bytes(b"identical-bytes")
+    c.write_bytes(b"different-bytes")
+
+    assert _same_image_file(str(a), str(b)) is True
+    assert _same_image_file(str(a), str(c)) is False
+    assert _same_image_file("", str(c)) is False
+    assert _same_image_file(str(a), str(tmp_path / "missing.jpg")) is False

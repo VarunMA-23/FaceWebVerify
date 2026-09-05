@@ -192,16 +192,29 @@ class Collector:
             # Write atomically so concurrent threads never observe a
             # partially-written image (digest names are content-addressed, so
             # two threads downloading the same bytes produce the same file).
+            # The temp name is unique per thread so concurrent writers of the
+            # same bytes never corrupt each other's ``.part`` file, and a
+            # Windows sharing violation on replace simply means another thread
+            # already committed the identical file first.
             if not os.path.exists(local_path):
-                tmp = os.path.join(storage, f".{digest}{ext}.part")
-                with open(tmp, "wb") as fh:
-                    fh.write(data)
+                tmp = os.path.join(
+                    storage, f".{digest}{ext}.{threading.get_ident()}.part"
+                )
                 try:
-                    os.replace(tmp, local_path)
-                except FileNotFoundError:
-                    # Another thread may have written the same content-addressed file.
-                    if not os.path.exists(local_path):
-                        raise
+                    with open(tmp, "wb") as fh:
+                        fh.write(data)
+                    try:
+                        os.replace(tmp, local_path)
+                    except (FileNotFoundError, PermissionError):
+                        # Another thread wrote the same content-addressed file.
+                        if not os.path.exists(local_path):
+                            raise
+                finally:
+                    if os.path.exists(tmp):
+                        try:
+                            os.remove(tmp)
+                        except OSError:
+                            pass
             return local_path
         except requests.RequestException:
             return ""

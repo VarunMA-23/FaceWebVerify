@@ -57,12 +57,33 @@ class FaceModel:
 
 
 def onnxruntime_providers() -> list[str]:
+    """Return ONNX Runtime providers ordered by preference.
+
+    Hard accelerators (CUDA / TensorRT / DirectML / ROCm) are preferred when
+    installed so machines with a GPU use it automatically, while machines
+    without one safely fall back to CPU. ``AzureExecutionProvider`` is
+    deliberately deprioritized (it is a local shim, not an accelerator).
+    """
     import onnxruntime as ort
 
     try:
-        return ort.get_available_providers()
+        available = set(ort.get_available_providers())
     except Exception:
         return []
+
+    preferred = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "ROCMExecutionProvider",
+        "DmlExecutionProvider",
+        "CoreMLExecutionProvider",
+    ]
+    ordered = [p for p in preferred if p in available]
+    if not ordered:
+        ordered = [p for p in available if p != "AzureExecutionProvider"]
+    if "CPUExecutionProvider" not in ordered:
+        ordered.append("CPUExecutionProvider")
+    return ordered
 
 
 # Prefer CPU for maximum compatibility; CUDA is used when available.

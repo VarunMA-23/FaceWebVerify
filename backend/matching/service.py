@@ -13,7 +13,9 @@ evidence source that produced a match (verified > thumbnail > none).
 
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 
 from backend.crawler.collector import Collector
 from backend.crawler.parser import infer_platform
@@ -25,14 +27,41 @@ from backend.face.matcher import (
     match_image_to_embedding,
 )
 
-#: Upper bound on how many candidate-image matches may run concurrently.
-#: Kept modest so inference + downloads never oversubscribe a low-core CPU.
-MAX_WORKERS = 8
+#: Ceiling on how many candidate-image matches may run concurrently. Scaled
+#: to the machine's core count (ONNX/InsightFace CPU inference releases the
+#: GIL during the forward pass, so worker threads genuinely overlap).
+MAX_WORKERS = max(4, int(os.cpu_count() or 4))
 
 #: Minimum available RAM (MiB) below which we still allow parallelism.
 #: Below this, fall back to sequential processing to stay smooth on
 #: very memory-constrained laptops.
 LOW_RAM_MIB = 1024
+
+
+def _same_image_file(path_a: str, path_b: str) -> bool:
+    """Return True when two local image files contain identical bytes.
+
+    Avoids a redundant detect + embed forward pass when a page's content
+    image is byte-identical to the search thumbnail already matched.
+    """
+    if not path_a or not path_b:
+        return False
+    try:
+        if os.path.getsize(path_a) != os.path.getsize(path_b):
+            return False
+        digest_a = sha256()
+        digest_b = sha256()
+        with open(path_a, "rb") as fh_a, open(path_b, "rb") as fh_b:
+            while True:
+                chunk_a = fh_a.read(1 << 20)
+                chunk_b = fh_b.read(1 << 20)
+                if not chunk_a or not chunk_b:
+                    break
+                digest_a.update(chunk_a)
+                digest_b.update(chunk_b)
+        return digest_a.digest() == digest_b.digest()
+    except OSError:
+        return False
 
 
 def _available_ram_mib() -> int:
@@ -199,12 +228,17 @@ class MatcherService:
         source_url: str,
         image_url: str,
         platform: str,
+        ev: CandidateEvidence | None = None,
     ) -> FaceMatch | None:
         """PATH B: crawl the page and match its best content image.
 
         Uses the page's *own* content image only (never re-uses the search
         thumbnail). If the page yields no own content image (e.g. a login
         wall), no verified evidence is produced.
+
+        If the page's content image is byte-identical to the thumbnail that
+        was already matched (passed via ``ev``), the thumbnail result is
+        reused to skip a redundant detect + embed forward pass.
         """
         page = self.collector.fetch_page(source_url)
         if page is None:
@@ -224,6 +258,26 @@ class MatcherService:
         if not local:
             return None
         self.evidence_cache[source_url].page_local = local
+        # Reuse the thumbnail match when the page image is byte-identical to
+        # the thumbnail, avoiding a second full inference pass. The result is
+        # re-tiered to VERIFIED because the page itself was successfully
+        # fetched and carries the same content image.
+        if (
+            ev is not None
+            and ev.thumbnail_match is not None
+            and ev.thumbnail_local
+            and _same_image_file(ev.thumbnail_local, local)
+        ):
+            tm = ev.thumbnail_match
+            return FaceMatch(
+                is_match=tm.is_match,
+                score=tm.score,
+                face=tm.face,
+                tier=EvidenceTier.VERIFIED,
+                source="page",
+                image_url=target,
+                page_url=page.url,
+            )
         try:
             return match_image_to_embedding(
                 reference,
@@ -268,7 +322,7 @@ class MatcherService:
         )
         # PATH B: real page content.
         ev.page_match = self._match_page(
-            reference_embedding, url, ev.image_url, ev.platform
+            reference_embedding, url, ev.image_url, ev.platform, ev
         )
         ev.combine(reference_embedding, self.threshold)
         # Image similarity: compare thumbnail vs page image hashes or dual face match scores

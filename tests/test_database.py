@@ -54,3 +54,49 @@ def test_blockchain_record_roundtrip(db):
     assert rec["content_hash"] == "hash123"
     assert rec["transaction_hash"] == "txabc"
     assert rec["block_number"] == 42
+
+
+def test_add_posts_batch(db):
+    db.create_job("j1", "/tmp/x.jpg")
+    posts = [
+        {
+            "post_url": "u1",
+            "image_url": "img1",
+            "platform": "ig",
+            "caption": "cap1",
+            "title": "t1",
+            "face_similarity": 0.5,
+            "evidence_tier": "verified",
+        },
+        {
+            "post_url": "u2",
+            "image_url": "img2",
+            "platform": "yt",
+            "caption": "cap2",
+            "title": "t2",
+            "face_similarity": 0.9,
+            "evidence_tier": "thumbnail",
+            "source_type": "social",
+            "domain": "youtube.com",
+            "evidence_score": 8,
+            "provider_count": 2,
+            "providers": ["bing", "tineye"],
+            "explanation": ["a", "b"],
+            "metadata": {"rank": 1},
+        },
+    ]
+    db.add_posts("j1", posts)
+    got = {p["post_url"]: p for p in db.get_posts("j1")}
+    assert set(got) == {"u1", "u2"}
+    # Simpler one uses defaults.
+    assert got["u1"]["source_type"] == ""
+    assert got["u1"]["providers_json"] == "[]"
+    # Richer one persists all serialized metadata.
+    assert got["u2"]["provider_count"] == 2
+    assert got["u2"]["evidence_score"] == 8
+    assert got["u2"]["source_type"] == "social"
+    assert "bing" in got["u2"]["providers_json"]
+
+    # Empty batch is a no-op.
+    db.add_posts("j1", [])
+    assert len(db.get_posts("j1")) == 2

@@ -621,34 +621,37 @@ class PipelineRunner:
         case_dir.save_match_annotated(best_img, faces)
 
     def _persist_candidates(self, job_id: str, candidates: list[MatchEvidence]) -> None:
+        posts = []
         for c in candidates:
-            self.db.add_post(
-                job_id=job_id,
-                post_url=c.page_url,
-                image_url=c.image_url,
-                platform=c.platform,
-                caption=c.caption or "",
-                title=c.title or "",
-                face_similarity=c.score,
-                evidence_tier=c.evidence_tier,
-                source_type=c.source_type,
-                domain=c.domain,
-                evidence_score=c.evidence_score,
-                provider_count=c.provider_count,
-                providers=c.providers,
-                explanation=c.explanation,
-                metadata={
-                    "score_breakdown": c.score_breakdown,
-                    "provider_consensus": c.provider_consensus,
-                    "image_similarity": c.image_similarity,
-                    "canonical_url": c.canonical_url,
-                    "page_retrieved": c.page_retrieved,
-                    "image_retrieved": c.image_retrieved,
-                    "is_social": is_social_source(c.source_type, c.platform),
-                    "social_handle": extract_social_handle(c.page_url, c.platform) or "",
-                    "rank": c.rank,
-                },
+            posts.append(
+                {
+                    "post_url": c.page_url,
+                    "image_url": c.image_url,
+                    "platform": c.platform,
+                    "caption": c.caption or "",
+                    "title": c.title or "",
+                    "face_similarity": c.score,
+                    "evidence_tier": c.evidence_tier,
+                    "source_type": c.source_type,
+                    "domain": c.domain,
+                    "evidence_score": c.evidence_score,
+                    "provider_count": c.provider_count,
+                    "providers": c.providers,
+                    "explanation": c.explanation,
+                    "metadata": {
+                        "score_breakdown": c.score_breakdown,
+                        "provider_consensus": c.provider_consensus,
+                        "image_similarity": c.image_similarity,
+                        "canonical_url": c.canonical_url,
+                        "page_retrieved": c.page_retrieved,
+                        "image_retrieved": c.image_retrieved,
+                        "is_social": is_social_source(c.source_type, c.platform),
+                        "social_handle": extract_social_handle(c.page_url, c.platform) or "",
+                        "rank": c.rank,
+                    },
+                }
             )
+        self.db.add_posts(job_id, posts)
 
     def _pick_best(self, matches: list[MatchEvidence]) -> MatchEvidence:
         return max(
