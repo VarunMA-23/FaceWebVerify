@@ -31,7 +31,6 @@ from backend.evidence.source import (
     normalize_platform,
     platform_display_name,
 )
-from backend.blockchain.backend import resolve_backend
 from backend.blockchain.config import get_chain_dir, get_difficulty
 from backend.blockchain.errors import BackendUnavailableError, ChainIntegrityError
 from backend.blockchain.integrity import verify_integrity

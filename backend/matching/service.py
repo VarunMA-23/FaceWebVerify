@@ -13,12 +13,10 @@ evidence source that produced a match (verified > thumbnail > none).
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 from backend.crawler.collector import Collector
 from backend.crawler.parser import infer_platform
-from backend.face.embedder import embed_face
 from backend.face.matcher import (
     SIMILARITY_THRESHOLD,
     EvidenceTier,

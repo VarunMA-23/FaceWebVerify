@@ -8,7 +8,6 @@ from enum import Enum
 import numpy as np
 
 from backend.face.detector import FaceDetection, detect_faces
-from backend.face.embedder import embed_face
 
 #: InsightFace cosine-similarity threshold above which two faces are
 #: considered a match.
