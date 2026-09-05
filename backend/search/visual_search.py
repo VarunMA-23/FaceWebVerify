@@ -1,8 +1,8 @@
 """Reverse image search providers.
 
-Supports Microsoft Bing Visual Search, OpenWeb Ninja (Google Lens data),
-SerpAPI, and TinEye. Each provider reads its key from the environment
-(``.env``); providers with no configured key are skipped automatically.
+Supports OpenWeb Ninja (Google Lens data), SerpAPI, and TinEye. Each provider
+reads its key from the environment (``.env``); providers with no configured
+key are skipped automatically.
 """
 
 from __future__ import annotations
@@ -41,40 +41,6 @@ class _Provider:
 
     def search(self, image_path: str) -> SearchResponse:
         raise NotImplementedError
-
-
-class BingProvider(_Provider):
-    """Microsoft Bing Visual Search API."""
-
-    endpoint = "https://api.bing.microsoft.com/v7.0/images/visualsearch"
-
-    def search(self, image_path: str) -> SearchResponse:
-        key = _env("BING_SEARCH_API_KEY")
-        try:
-            with open(image_path, "rb") as fh:
-                files = {"image": (os.path.basename(image_path), fh)}
-                headers = {"Ocp-Apim-Subscription-Key": key}
-                resp = requests.post(self.endpoint, headers=headers, files=files, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:  # noqa: BLE001
-            return SearchResponse(provider=self.name, error=str(exc))
-
-        results: list[SearchResult] = []
-        for tag in data.get("tags", []):
-            for action in tag.get("actions", []):
-                if action.get("actionType") != "PagesIncluding":
-                    continue
-                for item in action.get("data", {}).get("value", []):
-                    sr = SearchResult(
-                        url=item.get("hostPageUrl", ""),
-                        image_url=item.get("contentUrl", "") or item.get("thumbnailUrl", ""),
-                        title=item.get("name", ""),
-                        source=self.name,
-                    )
-                    if sr.url:
-                        results.append(sr)
-        return SearchResponse(results=results, provider=self.name)
 
 
 class SerpApiProvider(_Provider):
@@ -201,7 +167,6 @@ class OpenWebNinjaProvider(_Provider):
 
 
 PROVIDERS = [
-    BingProvider("bing"),
     OpenWebNinjaProvider("openwebninja"),
     SerpApiProvider("serpapi"),
     TinEyeProvider("tineye"),

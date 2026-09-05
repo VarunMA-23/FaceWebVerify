@@ -26,7 +26,7 @@ fingerprints the matched post with SHA-256, and can register that hash on the
 ## ✨ Features
 
 - 🧬 **512-D face embeddings** via InsightFace `buffalo_l` (ArcFace recognition head)
-- 🔎 **Reverse image search** across multiple providers (OpenWeb Ninja, Bing,
+- 🔎 **Reverse image search** across multiple providers (OpenWeb Ninja,
   SerpAPI, TinEye) with automatic fallback
 - ✅ **Tiered face matching** — evidence from *page content* (verified) *and*
   search *thumbnails* (login-walled posts)
@@ -105,7 +105,6 @@ cp .env.example .env            # macOS / Linux
 
 ```ini
 # Reverse image search — provide at least ONE of these
-BING_SEARCH_API_KEY=
 OPENWEBNINJA_API_KEY=
 SERPAPI_API_KEY=
 TINEYE_API_KEY=
@@ -226,7 +225,7 @@ python -m pytest tests/test_api.py -v           # HTTP API
 
 | Test | Needs to run live |
 |------|-------------------|
-| `tests/test_search.py` live tests | `OPENWEBNINJA_API_KEY`, `BING_SEARCH_API_KEY`, `SERPAPI_API_KEY`, or `TINEYE_API_KEY` |
+| `tests/test_search.py` live tests | `OPENWEBNINJA_API_KEY`, `SERPAPI_API_KEY`, or `TINEYE_API_KEY` |
 | `tests/test_blockchain.py` live test | `SEPOLIA_WALLET_PRIVATE_KEY` + `SEPOLIA_CONTRACT_ADDRESS` |
 
 ---
@@ -313,8 +312,8 @@ face-web-blockchain/
 
 1. **Face model** — InsightFace `buffalo_l` (ArcFace recognition head), 512-d
    L2-normalized embeddings, CPU provider by default.
-2. **Visual search** — provider list (OpenWeb Ninja, Bing Visual Search API,
-   SerpAPI, TinEye), chosen by which keys exist in `.env`. `search_web()`
+2. **Visual search** — provider list (OpenWeb Ninja, SerpAPI, TinEye), chosen
+   by which keys exist in `.env`. `search_web()`
    falls through to the first provider that returns results. OpenWeb Ninja and
    SerpAPI search by image URL, so local uploads are published to a temporary
    public host first (`backend/search/image_host.py`).
