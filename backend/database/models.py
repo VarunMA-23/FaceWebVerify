@@ -75,6 +75,7 @@ _MIGRATIONS = [
     "ALTER TABLE blockchain_records ADD COLUMN idempotent INTEGER DEFAULT 0",
     "ALTER TABLE blockchain_records ADD COLUMN merkle_proof_json TEXT DEFAULT ''",
     "ALTER TABLE blockchain_records ADD COLUMN checks_json TEXT DEFAULT ''",
+    "ALTER TABLE blockchain_records ADD COLUMN chain_root TEXT DEFAULT ''",
 ]
 
 
@@ -90,9 +91,10 @@ class Database:
         self._init()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 15000")
         return conn
 
     def _init(self) -> None:
@@ -213,14 +215,15 @@ class Database:
         merkle_proof: list | None = None,
         idempotent: bool = False,
         checks: list | None = None,
+        chain_root: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO blockchain_records "
                 "(job_id, content_hash, transaction_hash, block_number, registered_at, "
                 "evidence_id, record_type, backend, network, block_hash, merkle_root, "
-                "leaf_index, idempotent, merkle_proof_json, checks_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "leaf_index, idempotent, merkle_proof_json, checks_json, chain_root) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id,
                     content_hash,
@@ -237,6 +240,7 @@ class Database:
                     1 if idempotent else 0,
                     json.dumps(merkle_proof or []),
                     json.dumps(checks or []),
+                    chain_root,
                 ),
             )
 

@@ -87,7 +87,7 @@ class SerpApiProvider(_Provider):
         try:
             params = {"engine": "google_lens", "api_key": key}
             if image_path.startswith(("http://", "https://")):
-                image_url = image_path
+                params["url"] = image_path
             else:
                 image_url = host_image(image_path)
                 if not image_url:

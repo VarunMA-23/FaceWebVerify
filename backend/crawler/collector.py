@@ -167,9 +167,12 @@ class Collector:
                 return ""
             # Cap download size.
             length = resp.headers.get("Content-Length")
-            if length and int(length) > MAX_DOWNLOAD_BYTES:
-                resp.close()
-                return ""
+            try:
+                if length is not None and int(length) > MAX_DOWNLOAD_BYTES:
+                    resp.close()
+                    return ""
+            except ValueError:
+                pass  # malformed Content-Length -> rely on the streaming cap below
 
             chunks = []
             total = 0

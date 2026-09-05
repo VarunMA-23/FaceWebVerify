@@ -7,7 +7,7 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from backend.api.schemas import (
@@ -74,6 +74,8 @@ def verify_independent_evidence(evidence_id: str) -> IndependentEvidenceVerifica
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except (ConnectionError, OSError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except BackendUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     active = evidence["status"] == "active"
     return IndependentEvidenceVerificationModel(
@@ -167,8 +169,8 @@ def _post_from_row(p: dict, threshold: float = 0.4) -> PostSummary:
 @router.post("", response_model=JobAccepted)
 async def create_search(
     file: UploadFile = File(...),
-    limit: int = 5,
-    threshold: float = 0.4,
+    limit: int = Query(5, ge=1, le=1000),
+    threshold: float = Query(0.4, ge=0.0, le=1.0),
     hint: str = "",
 ) -> JobAccepted:
     if file.content_type not in ALLOWED_CONTENT_TYPES:
@@ -176,6 +178,12 @@ async def create_search(
             status_code=415,
             detail="Unsupported content type; use JPEG, PNG or WebP.",
         )
+    try:
+        declared = int(file.headers.get("content-length") or 0)
+        if declared > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 10 MB).")
+    except ValueError:
+        pass
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB).")
@@ -314,13 +322,37 @@ def verify_search(job_id: str, db: Database = Depends(get_db)) -> VerifyResponse
     except (ValueError, ConnectionError, BackendUnavailableError):
         on_chain = False
 
+    # Recompute the current fingerprint from the persisted evidence so the
+    # tamper check is real: if the stored evidence was modified after the
+    # attestation, hash_matches must report False.
+    meta = db.get_job_metadata(job_id)
+    current_hash = ""
+    passport = meta.get("passport") or {}
+    if passport:
+        try:
+            from backend.blockchain.reverify import recompute_current_hash
+
+            current_hash = recompute_current_hash(passport)
+        except Exception:  # noqa: BLE001
+            current_hash = ""
+
+    hash_matches = False
+    if current_hash:
+        hash_matches = current_hash.lower() == bc["content_hash"].lower()
+    else:
+        # Nothing to recompute against (legacy/no passport): fall back to
+        # reporting that the stored attestation still exists on-chain.
+        hash_matches = bool(on_chain)
+
     backend_name = bc.get("backend") or "evm"
-    verified = on_chain and (backend_name != "evm" or bool(bc["transaction_hash"]))
+    verified = (on_chain and hash_matches) and (
+        backend_name != "evm" or bool(bc["transaction_hash"])
+    )
     return VerifyResponseModel(
         job_id=job_id,
         verified=verified,
         on_chain=on_chain,
-        hash_matches=on_chain,
+        hash_matches=hash_matches,
         content_hash=bc["content_hash"],
         tx_hash=bc["transaction_hash"],
         backend=backend_name,
@@ -514,6 +546,12 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
         except (ValueError, ConnectionError, BackendUnavailableError):
             on_chain_evidence = None
         if on_chain_evidence:
+            on_chain_hash = (on_chain_evidence.get("content_hash") or "").lower()
+            evidence_hash_matches_attestation = bool(
+                on_chain_hash
+                and on_chain_hash.removeprefix("0x")
+                == evidence_content_hash.lower().removeprefix("0x")
+            )
             details.update(
                 {
                     "issuer": on_chain_evidence["issuer"],
@@ -521,8 +559,7 @@ def verify_integrity_endpoint(job_id: str, db: Database = Depends(get_db)) -> In
                     "status": on_chain_evidence["status"],
                     "evidence_content_hash_on_chain": on_chain_evidence["content_hash"],
                     "evidence_on_chain_hash_matches_attestation": (
-                        on_chain_evidence["content_hash"].lower()
-                        == evidence_content_hash.lower()
+                        evidence_hash_matches_attestation
                     ),
                 }
             )

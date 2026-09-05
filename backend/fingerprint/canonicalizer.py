@@ -93,10 +93,10 @@ class EvidenceRecord:
             "image_sha256": (self.image_sha256 or "").strip(),
             "caption": (self.caption or "").strip(),
             "title": (self.title or "").strip(),
-            "providers": sorted(self.providers),
+            "providers": sorted(self.providers or []),
             "provider_consensus": (self.provider_consensus or "").strip(),
             "evidence_score": int(self.evidence_score),
-            "verification_reasons": sorted(self.verification_reasons),
+            "verification_reasons": sorted(self.verification_reasons or []),
         }
         if self.image_similarity is not None:
             d["image_similarity_ppm"] = to_ppm(self.image_similarity)
@@ -135,10 +135,10 @@ class EvidenceRecord:
             "image_sha256": self.image_sha256,
             "caption": self.caption,
             "title": self.title,
-            "providers": sorted(self.providers),
+            "providers": sorted(self.providers or []),
             "provider_consensus": self.provider_consensus,
             "evidence_score": int(self.evidence_score),
-            "verification_reasons": sorted(self.verification_reasons),
+            "verification_reasons": sorted(self.verification_reasons or []),
         }
 
 

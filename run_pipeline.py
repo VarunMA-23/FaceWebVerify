@@ -235,6 +235,7 @@ def main() -> int:
 
         from backend.blockchain.backend import resolve_backend
         from backend.blockchain.checks import checks_to_dicts
+        from backend.blockchain.errors import BackendUnavailableError
         from backend.blockchain.verifier import verify_on_blockchain
 
         try:
@@ -274,7 +275,7 @@ def main() -> int:
                     )
                 except Exception:  # noqa: BLE001
                     pass
-        except (ValueError, ConnectionError) as exc:
+        except (ValueError, ConnectionError, BackendUnavailableError) as exc:
             fail(str(exc))
     else:
         warn("blockchain skipped (use --do-blockchain)")

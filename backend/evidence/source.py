@@ -79,6 +79,12 @@ def extract_domain(url: str) -> str:
         return ""
 
 
+def _domain_matches(domain: str, candidates) -> bool:
+    """Exact / subdomain match (never substring), so a crafty lookalike host
+    like ``notinstagram.com`` or ``foobbc.com`` can never be misclassified."""
+    return any(domain == d or domain.endswith("." + d) for d in candidates)
+
+
 def canonicalize_url(url: str) -> str:
     """Normalize URL for deduplication (strip tracking params, trailing slash)."""
     if not url:
@@ -101,16 +107,26 @@ def canonicalize_url(url: str) -> str:
     )
 
 
+def _reference_matches(domain: str) -> bool:
+    for d in REFERENCE_DOMAINS:
+        if d.endswith("."):  # host-prefix marker (e.g. "news.")
+            if domain.startswith(d):
+                return True
+        elif domain == d or domain.endswith("." + d):
+            return True
+    return False
+
+
 def classify_source_type(url: str, platform: str) -> str:
     """Classify source as social, wiki, reference, web, or search_thumbnail."""
     low = url.lower()
     domain = extract_domain(url)
     plat = normalize_platform(platform, url)
-    if plat in SOCIAL_PLATFORMS or any(d in domain for d in SOCIAL_DOMAIN_MAP):
+    if plat in SOCIAL_PLATFORMS or _domain_matches(domain, SOCIAL_DOMAIN_MAP):
         return "social"
-    if any(d in domain for d in WIKI_DOMAINS):
+    if _domain_matches(domain, WIKI_DOMAINS):
         return "wiki"
-    if any(d in low for d in REFERENCE_DOMAINS):
+    if _reference_matches(domain):
         return "reference"
     return "web"
 
@@ -122,10 +138,16 @@ def normalize_platform(platform: str, url: str = "") -> str:
         return "x"
     if p == "web" and url:
         domain = extract_domain(url)
-        for dom, name in SOCIAL_DOMAIN_MAP.items():
-            if dom in domain:
-                return name
+        return _lookup_social_platform(domain) or "web"
     return p or "web"
+
+
+def _lookup_social_platform(domain: str) -> str:
+    """Return the social platform slug for a domain (exact/subdomain match)."""
+    for dom, name in SOCIAL_DOMAIN_MAP.items():
+        if domain == dom or domain.endswith("." + dom):
+            return name
+    return ""
 
 
 def platform_display_name(platform: str) -> str:

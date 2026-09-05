@@ -118,23 +118,25 @@ def best_of(
     if not matches:
         return FaceMatch(is_match=False, score=0.0, face=None)
 
-    best = max(matches, key=lambda m: m.score)
-
-    # Evidence tier: a verified (page-content) match always outranks a
-    # thumbnail-only match at the same score; no match stays 'none'.
-    strongest_tier = EvidenceTier.NONE
-    for m in matches:
-        if m.is_match:
-            if strongest_tier is EvidenceTier.NONE:
-                strongest_tier = m.tier
-            elif strongest_tier == EvidenceTier.THUMBNAIL and m.tier == EvidenceTier.VERIFIED:
-                strongest_tier = EvidenceTier.VERIFIED
+    # Rank matches by (match, evidence strength, score) so the returned
+    # tier/source/score are all consistent with the single winning artifact.
+    # A verified (page-content) match always outranks a thumbnail match;
+    # a match always outranks a non-match.
+    _tier_rank = {
+        EvidenceTier.VERIFIED: 3,
+        EvidenceTier.THUMBNAIL: 2,
+        EvidenceTier.NONE: 1,
+    }
+    best = max(
+        matches,
+        key=lambda m: (m.is_match, _tier_rank[m.tier], m.score),
+    )
 
     return FaceMatch(
         is_match=best.is_match,
         score=best.score,
         face=best.face,
-        tier=strongest_tier if best.is_match else EvidenceTier.NONE,
+        tier=best.tier if best.is_match else EvidenceTier.NONE,
         source=best.source,
         image_url=best.image_url,
         page_url=best.page_url,

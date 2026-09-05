@@ -57,7 +57,12 @@ def _receipt_from_record(bc: dict) -> dict:
         "block_index": bc.get("block_number"),
     }
     if backend == "local":
-        ref["chain_root"] = str(config.get_chain_dir() / "local")
+        # Prefer the chain root persisted with the record; fall back to the
+        # current configured root so reverify for an older/custom chain_dir
+        # still checks the ledger that actually anchored the record.
+        ref["chain_root"] = str(
+            bc.get("chain_root") or config.get_chain_dir() / "local"
+        )
     return {
         "backend": backend,
         "network": bc.get("network") or "",

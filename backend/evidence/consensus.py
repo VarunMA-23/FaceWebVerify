@@ -129,7 +129,9 @@ def provider_consensus_label(
     providers_available: int,
 ) -> str:
     """Truthful consensus label."""
-    if providers_available <= 1:
+    if providers_available <= 0:
+        return "no provider available"
+    if providers_available == 1:
         return "1 provider available"
     return f"{provider_count}/{providers_available}"
 

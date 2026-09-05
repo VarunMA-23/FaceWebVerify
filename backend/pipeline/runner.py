@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -152,6 +153,7 @@ class PipelineRunner:
         result = PipelineResult(job_id=job_id, status="processing")
         timeline = TimelineTracker()
         try:
+            self.limit = max(1, int(self.limit or 1))
             self._execute(job_id, saved, result, timeline)
         except Exception as exc:  # noqa: BLE001
             result.status = "failed"
@@ -163,6 +165,7 @@ class PipelineRunner:
                 job_id,
                 {
                     "timeline": result.timeline,
+                    "phase": "complete" if result.status == "complete" else "failed",
                     "summary": result.summary,
                     "passport": result.passport,
                     "providers_used": result.providers_used,
@@ -170,6 +173,8 @@ class PipelineRunner:
                     "provider_errors": result.provider_errors,
                     "provider": result.provider,
                     "face_confidence": result.face_confidence,
+                    "face_detected": result.face_detected,
+                    "candidates_seen": result.candidates_seen,
                     "error": result.error,
                     "case_dir": result.case_dir,
                 },
@@ -456,9 +461,15 @@ class PipelineRunner:
         for ev in evidence:
             m = ev.best_match
             cache = service.evidence_cache.get(ev.page_url)
-            local = (
-                cache.page_local or cache.thumbnail_local if cache is not None else ""
-            )
+            if cache is None:
+                local = ""
+            else:
+                # Use the local image of the evidence tier that actually won,
+                # so the fingerprinted image matches the claimed tier.
+                if ev.tier.value == "verified":
+                    local = cache.page_local or cache.thumbnail_local
+                else:
+                    local = cache.thumbnail_local or cache.page_local
             source = build_source_info(
                 ev.page_url,
                 page_retrieved=ev.page_retrieved,
@@ -620,7 +631,13 @@ class PipelineRunner:
         img_sha = ""
         if c.local_image_path and Path(c.local_image_path).exists():
             img_sha = image_sha256_from_file(c.local_image_path)
-        evidence_id = uuid.uuid4().hex[:16]
+        # Deterministic evidence ID derived from the evidence content, so
+        # re-running the same input re-produces the same record (idempotent
+        # anchoring) instead of generating a fresh random ID every run.
+        seed = "\x1f".join(
+            [c.page_url, c.canonical_url, img_sha, c.caption or "", c.title or ""]
+        )
+        evidence_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
         record = EvidenceRecord(
             evidence_id=evidence_id,
             source_url=c.page_url,
@@ -648,6 +665,7 @@ class PipelineRunner:
 
         from backend.blockchain.backend import resolve_backend
         from backend.blockchain.checks import checks_to_dicts
+        from backend.blockchain.errors import BackendUnavailableError
         from backend.blockchain.verifier import verify_record
 
         try:
@@ -670,6 +688,7 @@ class PipelineRunner:
                 merkle_proof=[asdict(s) for s in receipt.merkle_proof],
                 idempotent=receipt.idempotent_hit,
                 checks=checks_to_dicts(checks),
+                chain_root=ref.get("chain_root") or "",
             )
 
             # EVM registry mode additionally attests the evidence mapping on-chain.
@@ -704,4 +723,8 @@ class PipelineRunner:
                 "registered_at": datetime.now(timezone.utc).isoformat(),
             }
         except (ValueError, ConnectionError) as exc:
+            return {"error": str(exc)}
+        except BackendUnavailableError as exc:
+            # Anchoring is an optional subsystem: a disabled/unconfigured
+            # backend must degrade the run gracefully, not fail the job.
             return {"error": str(exc)}

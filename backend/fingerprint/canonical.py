@@ -30,4 +30,7 @@ def sha256_hex(data: bytes) -> str:
 
 def to_ppm(value: float) -> int:
     """Convert a float similarity score to integer parts-per-million."""
-    return int(round(float(value) * 1_000_000))
+    num = float(value)
+    if not (num == num) or num in (float("inf"), float("-inf")):  # NaN / ±inf
+        raise ValueError(f"non-finite similarity score cannot be fingerprinted: {value!r}")
+    return int(round(num * 1_000_000))

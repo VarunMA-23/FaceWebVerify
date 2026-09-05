@@ -115,14 +115,19 @@ class LocalChain:
         self.difficulty_bits = int(difficulty_bits)
         self.network = f"local-merkle-chain(diff={self.difficulty_bits})"
         self._clock = clock or time.time
-        if not self.path.exists():
-            self._bootstrap()
+        self._bootstrap()
 
     # -- persistence ----------------------------------------------------
     def _bootstrap(self) -> None:
         with _dir_lock(self.path):
             if self.path.exists():
-                return
+                try:
+                    if any(self.path.read_text(encoding="utf-8").strip().splitlines()):
+                        return
+                except OSError:  # pragma: no cover - best effort
+                    pass
+            # Missing OR empty/whitespace-only ledger -> (re)create genesis so a
+            # crash mid-anchor can never leave the chain unusable.
             genesis = {
                 "index": 0,
                 "timestamp": "1970-01-01T00:00:00Z",  # fixed => reproducible genesis

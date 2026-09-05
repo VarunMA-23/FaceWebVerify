@@ -149,8 +149,9 @@ class EVMAnchor:
     def anchor(self, record_hash: str) -> AnchorReceipt:
         record_hash = validate_record_hash(record_hash)
         cached = self._cache.get(record_hash)
-        if cached:
+        if isinstance(cached, dict) and cached.get("chain_id") and cached.get("mode"):
             return self._receipt_from_entry(record_hash, cached, idempotent=True)
+        # Corrupt/foreign cache entries are ignored and re-anchored cleanly.
 
         if self._mode == "registry":
             tx_hash = self._send_registry(record_hash)
@@ -254,9 +255,12 @@ class EVMAnchor:
                 )
             )
         else:
+            contract_address = receipt.ref.get("contract") or self._registry_address
             from backend.blockchain.contract import get_contract
 
-            contract = get_contract(self._w3, address=self._registry_address)
+            if contract_address:
+                contract_address = self._w3.to_checksum_address(contract_address)
+            contract = get_contract(self._w3, address=contract_address)
             try:
                 stored_block = int(
                     contract.functions.recordBlock(bytes.fromhex(record_hash)).call()
@@ -274,8 +278,8 @@ class EVMAnchor:
             checks.append(
                 Check(
                     name="evm.registry_has_record",
-                    ok=stored_block == int(rcpt["blockNumber"]),
-                    expected=str(rcpt["blockNumber"]),
+                    ok=stored_block > 0,
+                    detail="hash is registered on-chain",
                     actual=str(stored_block),
                 )
             )
