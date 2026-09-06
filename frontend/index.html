@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
 <link rel="stylesheet" href="intro.css">
+<link rel="stylesheet" href="app.css">
 <style>
 :root {
   --background: #F8FAFC;
@@ -305,7 +306,9 @@ input[type=file]{display:none}
 .how-item strong{display:block;color:var(--text);font-size:.875rem;margin-bottom:4px}
 </style>
 </head>
-<body>
+<body class="app-shell">
+
+<div class="app-status" id="appStatus">Evidence investigation system · Ready</div>
 
 <!-- NAV -->
 <nav class="nav" role="navigation">
@@ -315,10 +318,10 @@ input[type=file]{display:none}
       EvidenceChain
     </a>
     <div class="nav-links">
-      <a href="#investigate">Investigate</a>
-      <a href="#results" class="nav-results hidden">Evidence</a>
-      <a href="#verification" class="nav-verify hidden">Verification</a>
-      <a href="#how">How it works</a>
+      <a href="#investigate" class="nav-link active" data-nav="investigate">Investigate</a>
+      <a href="#results" class="nav-link nav-results hidden" data-nav="results">Evidence</a>
+      <a href="#verification" class="nav-link nav-verify hidden" data-nav="verification">Verification</a>
+      <a href="#how" class="nav-link" data-nav="how">How it works</a>
     </div>
     <div class="nav-right">
       <div class="network-badge" title="Blockchain network">
@@ -333,39 +336,14 @@ input[type=file]{display:none}
 </nav>
 
 <main class="page">
-  <!-- HERO -->
-  <section class="hero-compact">
-    <p class="section-label">Discover · Verify · Attest</p>
-    <h1>Verify where a face appears online.</h1>
-    <p class="sub">Discover public sources, build transparent evidence, and anchor the result to an immutable cryptographic record.</p>
-    <div class="trust-row">
-      <span class="trust-item"><i data-lucide="check-circle"></i> Multi-source discovery</span>
-      <span class="trust-item"><i data-lucide="check-circle"></i> Explainable verification</span>
-      <span class="trust-item"><i data-lucide="check-circle"></i> Blockchain attestation</span>
-    </div>
-  </section>
 
-  <!-- EMPTY STATE -->
-  <section class="card empty-state" id="emptyState">
-    <i data-lucide="search" style="width:40px;height:40px;color:var(--primary);margin-bottom:16px"></i>
-    <h2>Start an evidence investigation</h2>
-    <p>Upload a face image to discover matching public sources across the web and social platforms.</p>
-    <div class="feature-grid">
-      <div class="feature-mini"><div class="fm-label">Discover</div><p>Find matching public sources via reverse-image search</p></div>
-      <div class="feature-mini"><div class="fm-label">Verify</div><p>Build transparent, explainable evidence records</p></div>
-      <div class="feature-mini"><div class="fm-label">Attest</div><p>Anchor evidence fingerprints on Ethereum Sepolia</p></div>
-    </div>
-  </section>
+  <!-- INVESTIGATION START -->
+  <section class="forensic-inline" id="investigate">
+    <p class="forensic-kicker">New Investigation</p>
+    <h1 class="forensic-title">Start an evidence investigation</h1>
+    <p class="forensic-sub">Upload a face image to discover matching public sources, verify evidence, and anchor a cryptographic record.</p>
 
-  <!-- INVESTIGATION WORKSPACE -->
-  <section class="card" id="investigate">
-    <div class="card-header">
-      <div>
-        <p class="section-label">New Investigation</p>
-        <h2 class="section-title">Upload a face image to begin an evidence search.</h2>
-      </div>
-    </div>
-    <div class="upload-layout" id="uploadLayout">
+    <div class="investigate-compact" style="margin-top:20px">
       <div>
         <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload face image">
           <div class="dropzone-icon" id="dropIcon"><i data-lucide="upload-cloud" style="width:28px;height:28px"></i></div>
@@ -376,15 +354,39 @@ input[type=file]{display:none}
         <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" aria-label="Choose image file">
         <div class="preview-wrap hidden" id="previewWrap"><img id="previewImg" alt="Uploaded face preview"></div>
       </div>
-      <div class="analysis-panel hidden" id="analysisPanel">
-        <h4>Input Analysis</h4>
-        <div class="analysis-row"><span class="label">Face detected</span><span class="val" id="aFace">—</span></div>
-        <div class="analysis-row"><span class="label">Face embedding</span><span class="val" id="aEmbed">—</span></div>
-        <div class="analysis-row"><span class="label">File size</span><span class="val" id="aSize">—</span></div>
-        <div class="analysis-row"><span class="label">Privacy</span><span class="val ok"><i data-lucide="lock" style="width:14px;height:14px"></i> Biometric data remains local</span></div>
+
+      <div class="forensic-panel hidden" id="subjectPanel">
+        <div class="forensic-panel-head">
+          <div><p class="forensic-kicker">Investigation Input</p><h2 class="forensic-title" style="font-size:1rem">Subject Analysis</h2></div>
+        </div>
+        <div class="forensic-panel-body">
+          <div class="subject-grid">
+            <div class="subject-image" id="subjectImageWrap"><img id="subjectThumb" alt="Investigation subject"></div>
+            <div class="subject-meta">
+              <div class="meta-row"><span class="mk">Face detected</span><span class="mv" id="aFace">—</span></div>
+              <div class="meta-row"><span class="mk">Face embedding</span><span class="mv" id="aEmbed">—</span></div>
+              <div class="meta-row"><span class="mk">Image fingerprint</span><span class="mv" id="aFingerprint">—</span></div>
+              <div class="meta-row"><span class="mk">File size</span><span class="mv" id="aSize">—</span></div>
+              <div class="meta-row"><span class="mk">File type</span><span class="mv" id="aType">—</span></div>
+              <div class="meta-row"><span class="mk">Dimensions</span><span class="mv" id="aDims">—</span></div>
+              <div class="meta-block">
+                <div class="mb-title">Privacy</div>
+                <div class="meta-row" style="border:none;padding:0"><span class="mk">Biometric data</span><span class="mv ok"><i data-lucide="lock" style="width:12px;height:12px"></i> Remains local</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="upload-actions">
+
+    <div class="process-rail">
+      <div class="process-step"><div class="ps-num">01</div><div class="ps-label">Discover</div><div class="ps-desc">Find matching public sources</div></div>
+      <div class="process-step"><div class="ps-num">02</div><div class="ps-label">Verify</div><div class="ps-desc">Analyze candidate evidence</div></div>
+      <div class="process-step"><div class="ps-num">03</div><div class="ps-label">Fingerprint</div><div class="ps-desc">Create cryptographic identity</div></div>
+      <div class="process-step"><div class="ps-num">04</div><div class="ps-label">Attest</div><div class="ps-desc">Anchor evidence on blockchain</div></div>
+    </div>
+
+    <div class="upload-actions" style="margin-top:16px">
       <button class="btn btn-primary" id="startBtn" disabled aria-label="Start investigation">
         Start Investigation <i data-lucide="arrow-right" style="width:16px;height:16px"></i>
       </button>
@@ -394,110 +396,168 @@ input[type=file]{display:none}
     <div class="alert alert-error hidden" id="errorBox" role="alert"></div>
   </section>
 
+  <div class="empty-compact" id="emptyState">
+    <p class="forensic-sub">Upload a face image above to begin reverse-image discovery and evidence verification.</p>
+    <div class="trust-inline">
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Multi-source discovery</span>
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Explainable verification</span>
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Blockchain attestation</span>
+    </div>
+  </div>
+
   <!-- PROGRESS -->
-  <section class="card progress-card hidden" id="pipelinePanel">
-    <div class="progress-header">
+  <section class="forensic-panel hidden" id="pipelinePanel">
+    <div class="forensic-panel-head">
       <div>
-        <p class="section-label">Investigation Progress</p>
-        <h2 class="section-title" id="loaderStep">Initializing…</h2>
+        <p class="forensic-kicker">Live Investigation</p>
+        <h2 class="forensic-title" style="font-size:1rem" id="loaderStep">Initializing…</h2>
       </div>
       <div class="progress-pct" id="progressPct">0%</div>
     </div>
-    <div class="progress-live" id="loaderHero">
-      <span class="pulse"></span>
-      <div>
-        <div style="font-weight:600;font-size:.875rem" id="loaderDetail">Preparing investigation</div>
-        <div class="provider-chips hidden" id="loaderProviders"></div>
+    <div class="forensic-panel-body">
+      <div class="macro-pipeline" id="macroPipeline">
+        <div class="macro-step waiting" data-macro="discover"><div class="macro-dot">1</div><div class="macro-label">Discover</div></div>
+        <div class="macro-step waiting" data-macro="verify"><div class="macro-dot">2</div><div class="macro-label">Verify</div></div>
+        <div class="macro-step waiting" data-macro="fingerprint"><div class="macro-dot">3</div><div class="macro-label">Fingerprint</div></div>
+        <div class="macro-step waiting" data-macro="attest"><div class="macro-dot">4</div><div class="macro-label">Attest</div></div>
       </div>
+      <div class="progress-live" id="loaderHero" style="margin-bottom:20px">
+        <span class="pulse"></span>
+        <div>
+          <div style="font-weight:600;font-size:.875rem" id="loaderDetail">Preparing investigation</div>
+          <div class="provider-chips hidden" id="loaderProviders"></div>
+        </div>
+      </div>
+      <div class="v-pipeline" id="vPipeline"></div>
     </div>
-    <div class="v-pipeline" id="vPipeline" style="margin-top:28px"></div>
   </section>
 
   <!-- RESULTS -->
   <div id="results" class="hidden">
-    <!-- Metrics -->
-    <section class="card hidden" id="summaryPanel">
-      <p class="section-label">Investigation Overview</p>
-      <h2 class="section-title">Search Summary</h2>
-      <div class="metrics" id="summaryStats" style="margin-top:20px"></div>
+
+    <section class="hidden" id="summaryPanel">
+      <p class="forensic-kicker">Investigation Summary</p>
+      <div class="summary-bar" id="summaryStats"></div>
     </section>
 
-    <!-- Best Evidence -->
-    <section class="card best-card hidden" id="bestPanel">
-      <div class="best-inner" id="bestHero"></div>
-      <div style="padding:20px 28px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px">
-        <button class="btn btn-secondary" id="whyBtn"><i data-lucide="help-circle" style="width:16px;height:16px"></i> Why This Match?</button>
-        <button class="btn btn-secondary" id="passportBtn"><i data-lucide="file-badge" style="width:16px;height:16px"></i> Evidence Passport</button>
+    <div class="evidence-workspace">
+
+      <div class="evidence-main">
+
+        <section class="forensic-panel evidence-detail hidden" id="bestPanel">
+          <div class="best-inner" id="bestHero"></div>
+          <div style="padding:14px 20px;border-top:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="whyBtn"><i data-lucide="help-circle" style="width:14px;height:14px"></i> Why This Match?</button>
+            <button class="btn btn-secondary btn-sm" id="passportBtn"><i data-lucide="file-badge" style="width:14px;height:14px"></i> Evidence Passport</button>
+          </div>
+        </section>
+
+        <section class="forensic-panel strength-panel hidden" id="scorePanel">
+          <div class="forensic-panel-head">
+            <div><p class="forensic-kicker">Forensic Assessment</p><h2 class="forensic-title" style="font-size:1rem">Evidence Strength</h2></div>
+          </div>
+          <div class="forensic-panel-body"><div class="score-section" id="scoreSection"></div></div>
+        </section>
+
+        <section class="forensic-panel hidden" id="consensusPanel">
+          <div class="forensic-panel-head">
+            <div><p class="forensic-kicker">Multi-Provider</p><h2 class="forensic-title" style="font-size:1rem">Search Consensus</h2></div>
+          </div>
+          <div class="forensic-panel-body" id="consensusContent"></div>
+        </section>
+
+        <section class="forensic-panel hidden" id="candidatesPanel">
+          <div class="forensic-panel-head">
+            <div><p class="forensic-kicker">Evidence Gallery</p><h2 class="forensic-title" style="font-size:1rem">Candidate Results</h2></div>
+          </div>
+          <div class="forensic-panel-body">
+            <div class="filter-bar" id="filterBar">
+              <button type="button" class="filter-chip active" data-filter="all">All</button>
+              <button type="button" class="filter-chip" data-filter="high">High Confidence</button>
+              <button type="button" class="filter-chip" data-filter="verified">Verified</button>
+              <button type="button" class="filter-chip" data-filter="social">Social</button>
+              <button type="button" class="filter-chip" data-filter="news">News</button>
+              <button type="button" class="filter-chip hidden" data-filter="archive">Archive</button>
+              <select class="sort-select" id="sortSelect" aria-label="Sort candidates">
+                <option value="score">Sort: Evidence Score</option>
+                <option value="face">Sort: Face Similarity</option>
+                <option value="image">Sort: Image Similarity</option>
+                <option value="rank">Sort: Rank</option>
+              </select>
+            </div>
+            <div class="candidates-grid" id="cardsGrid"></div>
+          </div>
+        </section>
+
+        <section class="forensic-panel hidden" id="timelinePanel">
+          <div class="forensic-panel-head">
+            <div><p class="forensic-kicker">Audit Trail</p><h2 class="forensic-title" style="font-size:1rem">Investigation Timeline</h2></div>
+          </div>
+          <div class="forensic-panel-body"><div class="inv-timeline" id="timeline"></div></div>
+        </section>
+
+        <section class="forensic-panel hidden" id="custodyPanel">
+          <div class="forensic-panel-head">
+            <div><p class="forensic-kicker">Provenance</p><h2 class="forensic-title" style="font-size:1rem">Chain of Custody</h2></div>
+          </div>
+          <div class="forensic-panel-body"><div class="custody-rail" id="custodyRail"></div></div>
+        </section>
+
       </div>
-    </section>
 
-    <!-- Score breakdown -->
-    <section class="card hidden" id="scorePanel">
-      <p class="section-label">Evidence Analysis</p>
-      <h2 class="section-title">Evidence Score</h2>
-      <p class="section-desc">Weighted evidence strength — separate from face similarity.</p>
-      <div class="score-section" id="scoreSection"></div>
-    </section>
+      <aside class="evidence-side">
+        <div class="chain-proof hidden" id="chainProofSidebar">
+          <div class="chain-proof-head">
+            <h3>Blockchain Proof</h3>
+            <div class="cph-status" id="chainProofStatus">Pending</div>
+          </div>
+          <div class="chain-proof-body" id="chainProofBody"></div>
+          <div class="chain-flow" id="chainFlow"></div>
+        </div>
+      </aside>
 
-    <!-- Provider consensus -->
-    <section class="card hidden" id="consensusPanel">
-      <p class="section-label">Multi-Provider</p>
-      <h2 class="section-title">Search Consensus</h2>
-      <div id="consensusContent"></div>
-    </section>
+    </div>
 
-    <!-- Candidates -->
-    <section class="card hidden" id="candidatesPanel">
-      <p class="section-label">All Sources</p>
-      <h2 class="section-title">Candidate Results</h2>
-      <div class="candidates-grid" id="cardsGrid" style="margin-top:20px"></div>
-    </section>
-
-    <!-- Timeline -->
-    <section class="card hidden" id="timelinePanel">
-      <p class="section-label">Audit Trail</p>
-      <h2 class="section-title">Evidence Timeline</h2>
-      <div class="ev-timeline" id="timeline" style="margin-top:20px"></div>
-    </section>
-
-    <!-- Passport -->
     <section class="hidden" id="passportPanel"><div class="passport-card" id="passportCard"></div></section>
 
-    <!-- Blockchain -->
-    <section class="card hidden" id="blockchainPanel">
-      <p class="section-label">On-Chain</p>
-      <h2 class="section-title">Blockchain Attestation</h2>
-      <div id="blockchainContent"></div>
+    <section class="forensic-panel hidden" id="blockchainPanel">
+      <div class="forensic-panel-head">
+        <div><p class="forensic-kicker">On-Chain Record</p><h2 class="forensic-title" style="font-size:1rem">Blockchain Attestation</h2></div>
+      </div>
+      <div class="forensic-panel-body" id="blockchainContent"></div>
     </section>
 
-    <!-- Integrity -->
-    <section class="card hidden" id="integrityPanel">
-      <p class="section-label" id="verification">Verification</p>
-      <h2 class="section-title">Verify Evidence Integrity</h2>
-      <p class="section-desc">Compare the current evidence fingerprint against the blockchain-attested record.</p>
-      <div id="integrityResult"></div>
-      <button class="btn btn-primary" id="runIntegrityBtn" style="margin-top:16px">
-        <i data-lucide="shield" style="width:16px;height:16px"></i> Verify Integrity
-      </button>
+    <section class="forensic-panel hidden" id="integrityPanel">
+      <div class="forensic-panel-head">
+        <div><p class="forensic-kicker" id="verification">Integrity Check</p><h2 class="forensic-title" style="font-size:1rem">Verify Evidence Integrity</h2></div>
+      </div>
+      <div class="forensic-panel-body">
+        <p class="forensic-sub" style="margin-bottom:16px">Compare the current evidence fingerprint against the blockchain-attested record.</p>
+        <div id="integrityResult"></div>
+        <button class="btn btn-primary btn-sm" id="runIntegrityBtn" style="margin-top:16px">
+          <i data-lucide="shield" style="width:16px;height:16px"></i> Verify Integrity
+        </button>
+      </div>
     </section>
   </div>
 
+  <hr class="section-divider">
+
   <!-- Privacy -->
-  <section class="card" style="margin-top:32px">
-    <p class="section-label">Trust</p>
-    <h2 class="section-title">Privacy by Design</h2>
-    <div class="privacy-grid" style="margin-top:16px">
-      <div class="privacy-item"><i data-lucide="check" style="width:18px;height:18px"></i> Raw biometric data never written to blockchain</div>
-      <div class="privacy-item"><i data-lucide="check" style="width:18px;height:18px"></i> Face embeddings remain local</div>
-      <div class="privacy-item"><i data-lucide="check" style="width:18px;height:18px"></i> Blockchain stores cryptographic fingerprints only</div>
-      <div class="privacy-item"><i data-lucide="check" style="width:18px;height:18px"></i> Evidence records are independently verifiable</div>
+  <section class="forensic-inline">
+    <p class="forensic-kicker">Trust</p>
+    <h2 class="forensic-title" style="font-size:1.125rem">Privacy by Design</h2>
+    <div class="trust-inline" style="margin-top:12px">
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Raw biometric data never written to blockchain</span>
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Face embeddings remain local</span>
+      <span><i data-lucide="check" style="width:14px;height:14px;color:var(--success)"></i> Cryptographic fingerprints only on-chain</span>
     </div>
   </section>
 
   <!-- How it works -->
-  <section class="card" id="how">
-    <p class="section-label">Documentation</p>
-    <h2 class="section-title">How verification works</h2>
+  <section class="forensic-inline" id="how">
+    <p class="forensic-kicker">Documentation</p>
+    <h2 class="forensic-title" style="font-size:1.125rem">How verification works</h2>
     <div class="how-grid" style="margin-top:16px">
       <div class="how-item"><strong>Face embedding</strong>InsightFace generates a 512-D vector locally — never stored on-chain.</div>
       <div class="how-item"><strong>Reverse-image discovery</strong>Configured providers search for matching public sources.</div>
@@ -529,7 +589,15 @@ input[type=file]{display:none}
 <script>
 const API_BASE = window.__API_BASE__ || '';
 const $ = id => document.getElementById(id);
-let jobId = null, lastData = null, pollStart = 0, previewUrl = null;
+let jobId = null, lastData = null, pollStart = 0, previewUrl = null, uploadMeta = {};
+let candidateFilter = 'all', candidateSort = 'score';
+
+const MACRO_GROUPS = {
+  discover: ['face','embedding','search','discover'],
+  verify: ['verify','match'],
+  fingerprint: ['score','select','fingerprint'],
+  attest: ['blockchain'],
+};
 
 const PIPELINE_STEPS = [
   { key:'face', steps:['face','embedding'], label:'Face Detection', num:'01' },
@@ -553,6 +621,59 @@ const FALLBACK_TL = [
   {step:'fingerprint',label:'Fingerprint Generated',status:'waiting',detail:''},
   {step:'blockchain',label:'Blockchain Attestation',status:'waiting',detail:''},
 ];
+
+function macroState(group, tl) {
+  const items = group.map(s => tl.find(t => t.step === s)).filter(Boolean);
+  if (!items.length) return 'waiting';
+  if (items.some(t => t.status === 'failed')) return 'failed';
+  if (items.some(t => t.status === 'processing')) return 'active';
+  if (items.every(t => ['success','warning'].includes(t.status))) return 'done';
+  if (items.some(t => ['success','warning'].includes(t.status))) return 'active';
+  return 'waiting';
+}
+
+function mapMacroPipeline(tl) {
+  document.querySelectorAll('.macro-step').forEach(el => {
+    const key = el.dataset.macro;
+    const group = MACRO_GROUPS[key] || [];
+    const st = macroState(group, tl);
+    el.className = 'macro-step ' + (st === 'active' ? 'active' : st === 'done' ? 'done' : 'waiting');
+    const dot = el.querySelector('.macro-dot');
+    if (dot) {
+      if (st === 'done') dot.textContent = '✓';
+      else if (st === 'active') dot.textContent = '●';
+      else dot.textContent = { discover:'1', verify:'2', fingerprint:'3', attest:'4' }[key] || '○';
+    }
+  });
+}
+
+function updateAppStatus(msg) {
+  const el = $('appStatus');
+  if (el) el.textContent = msg;
+}
+
+function setNavActive(id) {
+  document.querySelectorAll('.nav-link[data-nav]').forEach(a => {
+    a.classList.toggle('active', a.dataset.nav === id);
+  });
+}
+
+document.querySelectorAll('.nav-link[data-nav]').forEach(a => {
+  a.addEventListener('click', () => setNavActive(a.dataset.nav));
+});
+
+function setSubjectMeta(file) {
+  uploadMeta = { size: file.size, type: file.type || '—' };
+  $('aSize').textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+  $('aType').textContent = (file.type || '—').replace('image/', '').toUpperCase() || '—';
+  $('aDims').textContent = 'Reading…';
+  $('aFingerprint').textContent = 'Pending';
+  const img = new Image();
+  img.onload = () => { uploadMeta.dims = `${img.naturalWidth} × ${img.naturalHeight}`; $('aDims').textContent = uploadMeta.dims; };
+  img.onerror = () => { $('aDims').textContent = '—'; };
+  img.src = previewUrl;
+  if ($('subjectThumb')) $('subjectThumb').src = previewUrl;
+}
 
 function icons(){ if(window.lucide) lucide.createIcons(); }
 
@@ -606,9 +727,11 @@ function getTL(data) {
 
 function mapTimeline(data) {
   const tl = getTL(data);
+  mapMacroPipeline(tl);
   const active = tl.find(t => t.status === 'processing') || [...tl].reverse().find(t => ['success','warning'].includes(t.status));
   $('loaderStep').textContent = active?.label || 'Processing…';
   $('loaderDetail').textContent = active?.detail || `Step ${tl.filter(t=>t.status==='success').length} of ${tl.length}`;
+  updateAppStatus(data.status === 'complete' ? 'Investigation complete · Evidence ready for review' : data.status === 'failed' ? 'Investigation failed' : `Live investigation · ${active?.label || 'Processing'}`);
 
   const provEl = $('loaderProviders');
   const searching = active && (active.step === 'search' || active.step === 'discover');
@@ -631,7 +754,16 @@ function mapTimeline(data) {
     else if (st === 'failed') icon.innerHTML = '<i data-lucide="x" style="width:16px;height:16px"></i>';
     else icon.innerHTML = '<i data-lucide="circle" style="width:14px;height:14px"></i>';
     const sub = el.querySelector(`[data-sub="${s.key}"]`);
-    if (sub) sub.textContent = stepDetail(s.steps, tl);
+    if (sub) {
+      const items = s.steps.map(stp => tl.find(t => t.step === stp)).filter(Boolean);
+      const act = items.find(t => t.status === 'processing') || items.filter(t=>['success','warning'].includes(t.status)).pop();
+      let txt = act?.detail || '';
+      if (act?.timestamp) txt = (txt ? txt + ' · ' : '') + act.timestamp.slice(11,19);
+      if (act && (data.providers_used||[]).length && (s.key === 'search' || s.key === 'verify')) {
+        txt = (txt ? txt + ' · ' : '') + (data.providers_used||[]).join(', ').toUpperCase();
+      }
+      sub.textContent = txt;
+    }
   });
 
   const terminal = tl.filter(t => ['success','warning','failed'].includes(t.status)).length;
@@ -656,13 +788,13 @@ function setFile(file) {
   $('previewImg').src = previewUrl;
   $('previewWrap').classList.remove('hidden');
   dz.classList.add('hidden');
-  $('analysisPanel').classList.remove('hidden');
+  $('subjectPanel').classList.remove('hidden');
   $('replaceBtn').classList.remove('hidden');
   $('startBtn').disabled = false;
   $('emptyState').classList.add('hidden');
-  $('aFace').innerHTML = '<span class="ok" style="color:var(--success)">Pending scan</span>';
+  $('aFace').innerHTML = '<span class="mv ok">Pending scan</span>';
   $('aEmbed').textContent = 'Pending';
-  $('aSize').textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+  setSubjectMeta(file);
   hideError();
   icons();
 }
@@ -673,9 +805,10 @@ $('replaceBtn').onclick = () => {
   fi.value = '';
   $('previewWrap').classList.add('hidden');
   dz.classList.remove('hidden');
-  $('analysisPanel').classList.add('hidden');
+  $('subjectPanel').classList.add('hidden');
   $('replaceBtn').classList.add('hidden');
   $('startBtn').disabled = true;
+  $('emptyState').classList.remove('hidden');
 };
 
 $('startBtn').onclick = async () => {
@@ -686,8 +819,10 @@ $('startBtn').onclick = async () => {
   hideError();
   $('results').classList.remove('hidden');
   $('pipelinePanel').classList.remove('hidden');
-  ['summaryPanel','bestPanel','scorePanel','consensusPanel','candidatesPanel','timelinePanel','passportPanel','blockchainPanel','integrityPanel'].forEach(id => $(id).classList.add('hidden'));
+  ['summaryPanel','bestPanel','scorePanel','consensusPanel','candidatesPanel','timelinePanel','custodyPanel','passportPanel','blockchainPanel','integrityPanel'].forEach(id => $(id).classList.add('hidden'));
+  $('chainProofSidebar').classList.add('hidden');
   document.querySelectorAll('.nav-results,.nav-verify').forEach(el => el.classList.remove('hidden'));
+  setNavActive('results');
   initVPipeline();
   pollStart = Date.now();
   mapTimeline({status:'processing', timeline:[]});
@@ -712,8 +847,8 @@ async function poll(id) {
     mapTimeline(d);
     if (d.status === 'processing') {
       if (d.face_detected) {
-        $('aFace').innerHTML = '<span style="color:var(--success);display:flex;align-items:center;gap:4px"><i data-lucide="check" style="width:14px;height:14px"></i> Yes</span>';
-        $('aEmbed').innerHTML = '<span style="color:var(--success);display:flex;align-items:center;gap:4px"><i data-lucide="check" style="width:14px;height:14px"></i> Generated</span>';
+        $('aFace').innerHTML = '<span class="mv ok"><i data-lucide="check" style="width:12px;height:12px"></i> Yes</span>';
+        $('aEmbed').innerHTML = '<span class="mv ok"><i data-lucide="check" style="width:12px;height:12px"></i> Generated</span>';
         icons();
       }
       const active = (d.timeline||[]).find(t => t.status === 'processing');
@@ -727,41 +862,184 @@ async function poll(id) {
   showError('Investigation timed out.');
 }
 
+function truncateHash(h, n = 8) {
+  if (!h || h.length < n * 2 + 3) return h || '—';
+  return h.slice(0, n) + '…' + h.slice(-n);
+}
+
+function filterCandidates(list) {
+  return list.filter(c => {
+    if (candidateFilter === 'all') return true;
+    if (candidateFilter === 'high') return (c.evidence_score || 0) >= 60 || (c.similarity || 0) >= 0.5;
+    if (candidateFilter === 'verified') return c.evidence_tier === 'verified';
+    if (candidateFilter === 'social') return c.source_type === 'social';
+    if (candidateFilter === 'news') return c.source_type === 'news' || (c.platform || '').toLowerCase().includes('news');
+    if (candidateFilter === 'archive') return c.source_type === 'archive' || (c.platform || '').toLowerCase().includes('archive');
+    return true;
+  });
+}
+
+function sortCandidates(list) {
+  const sorted = [...list];
+  if (candidateSort === 'face') sorted.sort((a,b) => (b.similarity||0) - (a.similarity||0));
+  else if (candidateSort === 'image') sorted.sort((a,b) => (b.image_similarity||0) - (a.image_similarity||0));
+  else if (candidateSort === 'rank') sorted.sort((a,b) => (a.rank||999) - (b.rank||999));
+  else sorted.sort((a,b) => (b.evidence_score||0) - (a.evidence_score||0));
+  return sorted;
+}
+
+function renderCandidatesGrid(d) {
+  const filtered = sortCandidates(filterCandidates(d.candidates || []));
+  $('cardsGrid').innerHTML = filtered.length
+    ? filtered.map((c,i) => renderCard(c, i, i === 0)).join('')
+    : '<p style="color:var(--text-muted);font-size:.875rem">No candidates match the current filter.</p>';
+}
+
+function setupFilters(d) {
+  const types = new Set((d.candidates||[]).map(c => c.source_type).filter(Boolean));
+  document.querySelectorAll('.filter-chip').forEach(chip => {
+    const f = chip.dataset.filter;
+    if (f === 'social') chip.classList.toggle('hidden', !types.has('social'));
+    if (f === 'news') chip.classList.toggle('hidden', !types.has('news') && !(d.candidates||[]).some(c => (c.platform||'').toLowerCase().includes('news')));
+    if (f === 'archive') chip.classList.toggle('hidden', !types.has('archive') && !(d.candidates||[]).some(c => (c.platform||'').toLowerCase().includes('archive')));
+  });
+  document.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      candidateFilter = chip.dataset.filter;
+      renderCandidatesGrid(d);
+      icons();
+    };
+  });
+  const sortEl = $('sortSelect');
+  if (sortEl) {
+    sortEl.onchange = () => { candidateSort = sortEl.value; renderCandidatesGrid(d); icons(); };
+  }
+}
+
+function renderCustody(d) {
+  const tl = d.timeline || [];
+  const find = step => tl.find(t => t.step === step);
+  const stages = [
+    { key:'discover', label:'Discovered', step:'discover', actor:'Search providers' },
+    { key:'retrieved', label:'Retrieved', step:'verify', actor:'Source crawler' },
+    { key:'verified', label:'Verified', step:'verify', actor:'Verification engine' },
+    { key:'matched', label:'Matched', step:'match', actor:'Face matcher' },
+    { key:'fingerprinted', label:'Fingerprinted', step:'fingerprint', actor:'SHA-256 hasher' },
+    { key:'attested', label:'Attested', step:'blockchain', actor:'Ethereum Sepolia' },
+  ];
+  $('custodyPanel').classList.remove('hidden');
+  $('custodyRail').innerHTML = stages.map(s => {
+    const ev = find(s.step);
+    const done = ev && ['success','warning'].includes(ev.status);
+    const time = ev?.timestamp ? ev.timestamp.slice(11,19) : '';
+    return `<div class="custody-step ${done?'done':''}">
+      <div class="custody-dot"></div>
+      <div><div class="cs-label">${s.label}</div>
+      ${time ? `<div class="cs-time">${esc(time)} · ${esc(s.actor)}</div>` : `<div class="cs-time">${esc(s.actor)}</div>`}
+      ${ev?.detail ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:2px">${esc(ev.detail)}</div>` : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderChainProof(d) {
+  const bc = d.blockchain;
+  const p = d.passport;
+  const hash = bc?.content_hash || p?.content_hash;
+  const tx = bc?.tx_hash || p?.tx_hash;
+  const attested = bc?.verified || p?.integrity_status === 'attested';
+  if (!hash && !tx && !p?.evidence_id) {
+    $('chainProofSidebar').classList.add('hidden');
+    return;
+  }
+  $('chainProofSidebar').classList.remove('hidden');
+  $('chainProofStatus').textContent = attested ? '✓ Confirmed' : tx ? 'Processing' : 'Pending';
+  $('chainProofBody').innerHTML = `
+    ${p?.evidence_id ? `<div class="chain-field"><div class="cf-k">Evidence ID</div><div class="cf-v">${esc(p.evidence_id)}</div></div>` : ''}
+    <div class="chain-field"><div class="cf-k">Version</div><div class="cf-v">${esc(p?.schema_version || '01')}</div></div>
+    ${hash ? `<div class="chain-field"><div class="cf-k">Fingerprint</div><div class="cf-v">${esc(truncateHash(hash, 10))}</div></div>` : ''}
+    <div class="chain-field"><div class="cf-k">Network</div><div class="cf-v">${esc(p?.blockchain_network || 'Ethereum Sepolia')}</div></div>
+    <div class="chain-field"><div class="cf-k">Attestation</div><div class="cf-v">${attested ? '✓ CONFIRMED' : tx ? 'SUBMITTED' : '—'}</div></div>
+    ${tx ? `<div class="chain-field"><div class="cf-k">Transaction</div><div class="cf-v">${esc(truncateHash(tx, 10))}</div></div>` : ''}
+    ${bc?.block_number ? `<div class="chain-field"><div class="cf-k">Block</div><div class="cf-v">#${bc.block_number}</div></div>` : ''}
+    ${p?.attested_at || bc?.registered_at ? `<div class="chain-field"><div class="cf-k">Timestamp</div><div class="cf-v">${esc((p?.attested_at || bc?.registered_at || '').slice(0,19).replace('T',' '))}</div></div>` : ''}
+    ${tx ? `<a class="btn btn-secondary btn-sm" style="margin-top:10px;width:100%;justify-content:center" href="https://sepolia.etherscan.io/tx/${esc(tx)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:14px;height:14px"></i> View on Explorer</a>` : ''}`;
+  const steps = [
+    { label:'Evidence', done: !!hash },
+    { label:'SHA-256', done: !!hash },
+    { label:'Attestation', done: !!tx },
+    { label:'Block', done: !!bc?.block_number },
+    { label:'Blockchain', done: attested },
+  ];
+  $('chainFlow').innerHTML = `<div class="chain-flow-steps">${steps.map((s,i) =>
+    `${i ? '<div class="chain-flow-arrow">↓</div>' : ''}<div class="cfs-item ${s.done?'done':''}">${s.done ? '✓' : '○'} ${s.label}</div>`
+  ).join('')}</div>`;
+}
+
+function animateScore(el, target) {
+  if (!el) return;
+  const node = el.querySelector('.score-num .n');
+  if (!node) return;
+  el.classList.add('score-animate');
+  let cur = 0;
+  const step = Math.max(1, Math.ceil(target / 30));
+  const tick = () => {
+    cur = Math.min(target, cur + step);
+    node.textContent = cur;
+    if (cur < target) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function render(d) {
   if (d.status === 'failed') { mapTimeline(d); showError(d.error || 'Investigation failed'); return; }
   mapTimeline(d);
+  updateAppStatus('Investigation complete · Evidence ready for review');
+  setNavActive('results');
   if (d.face_detected) {
-    $('aFace').innerHTML = '<span style="color:var(--success);display:flex;align-items:center;gap:4px"><i data-lucide="check" style="width:14px;height:14px"></i> Yes</span>';
-    $('aEmbed').innerHTML = '<span style="color:var(--success);display:flex;align-items:center;gap:4px"><i data-lucide="check" style="width:14px;height:14px"></i> Generated</span>';
+    $('aFace').innerHTML = '<span class="mv ok"><i data-lucide="check" style="width:12px;height:12px"></i> Yes</span>';
+    $('aEmbed').innerHTML = '<span class="mv ok"><i data-lucide="check" style="width:12px;height:12px"></i> Generated</span>';
   }
+  const fp = d.passport?.content_hash || d.blockchain?.content_hash;
+  if (fp) $('aFingerprint').innerHTML = '<span class="mv ok">Ready</span>';
+  else if (d.status === 'complete') $('aFingerprint').textContent = '—';
 
   const s = d.summary || {};
+  const bestScore = s.best_evidence_score || (d.candidates?.[0]?.evidence_score) || 0;
+  const sources = s.candidates_found || d.candidates_seen || 0;
   $('summaryPanel').classList.remove('hidden');
-  $('summaryStats').innerHTML = [
-    [s.candidates_found||d.candidates_seen||0, 'Candidates'],
-    [s.face_matches||0, 'Face Matches'],
-    [s.verified_sources||0, 'Verified Sources'],
-    [s.social_sources||0, 'Social Sources'],
-    [(d.providers_used||[]).length || d.providers_available||0, 'Providers'],
-    [s.best_evidence_score||0, 'Evidence Score'],
-  ].map(([v,l]) => `<div class="metric-card"><div class="metric-val">${esc(String(v))}</div><div class="metric-lbl">${l}</div></div>`).join('');
+  $('summaryStats').innerHTML = `
+    <div><span class="sb-highlight">${esc(String(bestScore))}</span><span class="sb-highlight-label">Evidence Strength</span></div>
+    <span class="sb-item"><b>${esc(String(sources))}</b> sources discovered</span>
+    <span class="sb-item"><b>${esc(String(s.face_matches||0))}</b> high-confidence matches</span>
+    <span class="sb-item"><b>${esc(String(s.verified_sources||0))}</b> verified sources</span>
+    <span class="sb-item"><b>${esc(String((d.providers_used||[]).length || d.providers_available||0))}</b> search provider${((d.providers_used||[]).length||d.providers_available||0)!==1?'s':''}</span>`;
 
   const best = d.matched_post || (d.candidates||[])[0];
   if (best) { $('bestPanel').classList.remove('hidden'); renderBest(best, d.passport); renderScore(best, d.passport); }
   renderConsensus(d);
   $('candidatesPanel').classList.remove('hidden');
-  $('cardsGrid').innerHTML = (d.candidates||[]).map((c,i) => renderCard(c,i)).join('') || '<p style="color:var(--text-muted)">No candidates found.</p>';
+  candidateFilter = 'all';
+  candidateSort = 'score';
+  if ($('sortSelect')) $('sortSelect').value = 'score';
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.toggle('active', c.dataset.filter === 'all'));
+  setupFilters(d);
+  renderCandidatesGrid(d);
 
   $('timelinePanel').classList.remove('hidden');
   $('timeline').innerHTML = (d.timeline||[]).map(t => {
-    const st = t.status === 'success' ? 'done' : t.status === 'processing' ? 'active' : t.status;
-    const icon = t.status === 'success' ? 'check' : t.status === 'failed' ? 'x' : 'circle';
-    return `<div class="ev-tl-item ${st}"><div class="ev-tl-dot"><i data-lucide="${icon}" style="width:12px;height:12px"></i></div>
-      <div><div class="ev-tl-time">${t.timestamp ? esc(t.timestamp.slice(11,19)) : ''}</div>
-      <div class="ev-tl-label">${esc(t.label)}</div>${t.detail?`<div class="ev-tl-detail">${esc(t.detail)}</div>`:''}</div></div>`;
+    const st = t.status === 'success' ? 'done' : t.status === 'processing' ? 'active' : t.status === 'failed' ? 'failed' : '';
+    return `<div class="inv-tl-item ${st}">
+      <div class="inv-tl-time">${t.timestamp ? esc(t.timestamp.slice(11,19)) : ''}</div>
+      <div class="inv-tl-label">${esc(t.label)}</div>
+      ${t.detail?`<div class="inv-tl-detail">${esc(t.detail)}</div>`:''}
+    </div>`;
   }).join('');
 
+  renderCustody(d);
   if (d.passport?.content_hash) renderPassport(d.passport, d.blockchain);
+  renderChainProof(d);
   renderBlockchain(d);
   $('integrityPanel').classList.remove('hidden');
   icons();
@@ -783,30 +1061,44 @@ function renderBest(c, passport) {
   window._bestData = { c, passport, breakdown };
   window._bestExplanation = c.explanation || passport?.verification_reasons || [];
 
-  const socialVerified = c.source_type === 'social' && c.evidence_tier === 'verified';
+  const verified = c.evidence_tier === 'verified';
   const handle = c.social_handle || passport?.social_handle || '';
+  const reasons = (window._bestExplanation || []).slice(0, 4);
   $('bestHero').innerHTML = `
     <div class="best-image">${c.image_url ? `<img src="${esc(c.image_url)}" alt="Best evidence source" onerror="this.parentElement.innerHTML='<i data-lucide=image-off style=width:48px;height:48px;color:var(--text-dim)></i>'">` : '<i data-lucide="image-off" style="width:48px;height:48px;color:var(--text-dim)"></i>'}</div>
     <div class="best-content">
-      <div class="best-title">Best Evidence</div>
-      <div class="best-badge-row">
-        ${badge(c.evidence_tier)} ${badge(c.source_type||'web',true)}
-        ${socialVerified ? '<span class="badge b-verified"><i data-lucide="check" style="width:12px;height:12px"></i> Verified Social Source</span>' : ''}
+      <div class="best-header-row">
+        <div>
+          <p class="forensic-kicker" style="margin-bottom:4px">Primary Match</p>
+          <div class="best-title">Best Evidence</div>
+        </div>
+        ${verified ? '<span class="badge b-verified">VERIFIED</span>' : badge(c.evidence_tier)}
       </div>
-      <div class="best-platform">${esc(c.platform || 'Unknown platform')}</div>
-      <div class="best-domain">${handle ? esc(handle) : esc(c.domain || c.title || 'Username unavailable')}</div>
-      ${socialVerified ? '<p style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Matching public source discovered and verified — not proof of account ownership.</p>' : ''}
-      <div class="best-metrics">
-        <div class="best-metric"><div class="bm-lbl">Face Similarity</div><div class="bm-val">${(c.similarity*100).toFixed(1)}%</div></div>
-        ${c.image_similarity != null ? `<div class="best-metric"><div class="bm-lbl">Image Similarity</div><div class="bm-val">${(c.image_similarity*100).toFixed(1)}%</div></div>` : ''}
-        <div class="best-metric"><div class="bm-lbl">Evidence Score</div><div class="bm-val">${c.evidence_score||0} / 100</div></div>
-        <div class="best-metric"><div class="bm-lbl">Provider Consensus</div><div class="bm-val">${esc(c.provider_consensus || '—')}</div></div>
+      <div class="best-badge-row">${badge(c.source_type||'web',true)}</div>
+      <p class="forensic-kicker" style="margin:12px 0 4px">Source Information</p>
+      <div class="best-platform">${esc(c.platform || 'web')}</div>
+      <div class="best-domain">${handle ? esc(handle) : esc(c.domain || c.title || '—')}</div>
+      <div class="metric-strip">
+        <div class="ms-cell"><div class="ms-l">Face Similarity</div><div class="ms-v">${(c.similarity*100).toFixed(1)}%</div></div>
+        ${c.image_similarity != null ? `<div class="ms-cell"><div class="ms-l">Image Similarity</div><div class="ms-v">${(c.image_similarity*100).toFixed(1)}%</div></div>` : ''}
+        <div class="ms-cell"><div class="ms-l">Evidence Strength</div><div class="ms-v">${c.evidence_score||0}<span style="font-size:.75rem;font-weight:500;color:var(--text-muted)"> /100</span></div></div>
+        <div class="ms-cell"><div class="ms-l">Source Status</div><div class="ms-v" style="font-size:.75rem">${esc(tierLabel(c).split(' ')[0].toUpperCase())}</div></div>
       </div>
-      <div class="best-actions">
-        <a class="btn btn-primary" href="${esc(c.url)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:16px;height:16px"></i> View Original Source</a>
+      ${reasons.length ? `<div class="why-inline"><div class="wi-title">Why This Match?</div><ul>${reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
+      <div class="best-actions" style="margin-top:16px">
+        <a class="btn btn-primary btn-sm" href="${esc(c.url)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:14px;height:14px"></i> View Original Source</a>
       </div>
     </div>`;
 }
+
+const SCORE_HINTS = {
+  face_similarity: 'Facial embedding cosine similarity against the subject.',
+  image_similarity: 'Perceptual hash similarity between source and input images.',
+  source_verified: 'Source page was successfully retrieved and classified.',
+  provider_consensus: 'Agreement across configured reverse-image search providers.',
+  metadata_consistency: 'Caption, title, and platform metadata alignment.',
+  social_source_bonus: 'Bonus for verified public social profile sources.',
+};
 
 function renderScore(c, passport) {
   const score = c.evidence_score || passport?.evidence_score || 0;
@@ -816,18 +1108,20 @@ function renderScore(c, passport) {
   const max = 100;
   const circ = 2 * Math.PI * 52;
   const offset = circ - (score / max) * circ;
-  const labels = { face_similarity:'Face similarity', image_similarity:'Image similarity', source_verified:'Source verification', provider_consensus:'Provider consensus', metadata_consistency:'Metadata consistency', social_source_bonus:'Social source' };
+  const labels = { face_similarity:'Face match', image_similarity:'Image match', source_verified:'Source verification', provider_consensus:'Provider consensus', metadata_consistency:'Metadata consistency', social_source_bonus:'Social source' };
   $('scoreSection').innerHTML = `
     <div class="score-ring-wrap">
-      <div class="score-ring">
+      <div class="score-ring" id="scoreRingAnim">
         <svg width="120" height="120" viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fill" cx="60" cy="60" r="52" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg>
-        <div class="score-num"><span class="n">${score}</span><span class="l">Evidence Score</span></div>
+        <div class="score-num"><span class="n">0</span><span class="l">/ 100</span></div>
       </div>
+      <p style="font-size:.6875rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);text-align:center;margin-top:8px">Evidence Strength</p>
     </div>
     <div class="breakdown">
-      ${Object.entries(bd).map(([k,v]) => `<div class="breakdown-row"><span class="breakdown-label">${labels[k]||k}</span><div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.min(100,(v/(SCORE_WEIGHTS[k]||40))*100)}%"></div></div><span class="breakdown-pts">${v} / ${SCORE_WEIGHTS[k]||'—'}</span></div>`).join('')}
-      <div class="breakdown-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-weight:700"><span class="breakdown-label">Total</span><span></span><span class="breakdown-pts">${score} / 100</span></div>
+      ${Object.entries(bd).map(([k,v]) => `<div class="breakdown-row" title="${esc(SCORE_HINTS[k]||'')}"><span class="breakdown-label">${labels[k]||k}</span><div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.min(100,(v/(SCORE_WEIGHTS[k]||40))*100)}%"></div></div><span class="breakdown-pts">${v} / ${SCORE_WEIGHTS[k]||'—'}</span></div>`).join('')}
+      <p style="font-size:.75rem;color:var(--text-muted);margin-top:14px">Evidence strength reflects verification signals — not identity certainty.</p>
     </div>`;
+  animateScore($('scoreRingAnim'), score);
 }
 
 function renderConsensus(d) {
@@ -837,58 +1131,53 @@ function renderConsensus(d) {
   const errors = d.provider_errors || s.provider_errors || {};
   if (!used.length && avail <= 0 && !Object.keys(errors).length) return;
   $('consensusPanel').classList.remove('hidden');
-  const consensusLabel = s.provider_consensus || (avail <= 1 ? '1 provider available' : `${used.length}/${avail}`);
   const allProviders = [...new Set([...used, ...Object.keys(errors)])];
-
-  let rows = '';
-  (d.candidates||[]).slice(0, 5).forEach((c, i) => {
-    const provs = c.providers || [];
-    if (!allProviders.length) {
-      rows += `<div class="consensus-row"><span class="cr-label">Candidate #${c.rank||i+1}</span><span style="color:var(--text-muted);font-size:.8125rem">${c.provider_count||0} provider(s)</span></div>`;
-      return;
-    }
-    rows += `<div class="consensus-row"><span class="cr-label">Candidate #${c.rank||i+1}</span><div class="consensus-providers">${
-      allProviders.map(p => `<span class="prov-tag ${provs.includes(p)?'yes':'no'}">${provs.includes(p)?'<i data-lucide=check style=width:12px;height:12px></i>':'<i data-lucide=x style=width:12px;height:12px></i>'} ${esc(p)}</span>`).join('')
-    }</div></div>`;
-  });
-
-  const errorChips = Object.entries(errors).map(([p, err]) =>
-    `<span class="chip warn" title="${esc(err)}">${esc(p)} unavailable</span>`).join('');
+  const sources = s.candidates_found || d.candidates_seen || 0;
+  const verified = s.verified_sources || 0;
+  const candidates = (d.candidates||[]).length;
 
   $('consensusContent').innerHTML = `
-    <div class="consensus-header">
-      <div class="provider-chips">${allProviders.map(p => {
-        const ok = used.includes(p);
-        const failed = errors[p];
-        return `<span class="chip ${ok?'done':failed?'warn':'pending'}">${ok?'<i data-lucide=check style=width:12px;height:12px></i>':'<i data-lucide=x style=width:12px;height:12px></i>'} ${esc(p)}</span>`;
-      }).join('') || '<span class="chip">No provider data</span>'}</div>
-      <div class="consensus-big">${esc(consensusLabel)}</div>
-      <div style="font-size:.6875rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-top:4px">${avail > 1 ? 'Providers agree' : 'Single provider'}</div>
+    <div class="consensus-compact">
+      <div class="consensus-box">
+        <div class="cb-title">Search Providers</div>
+        ${allProviders.length ? allProviders.map(p => {
+          const ok = used.includes(p);
+          const failed = errors[p];
+          return `<div class="provider-row"><span>${esc(p.toUpperCase())}</span><span style="color:${ok?'var(--success)':failed?'var(--warning)':'var(--text-dim)'};font-size:.75rem;font-weight:600">${ok?'✓ ACTIVE':failed?'UNAVAILABLE':'—'}</span></div>`;
+        }).join('') : '<p style="font-size:.8125rem;color:var(--text-muted)">No provider data</p>'}
+        <p style="font-size:.75rem;color:var(--text-muted);margin-top:10px">${avail} provider${avail!==1?'s':''} available</p>
+        ${avail <= 1 ? '<p style="font-size:.75rem;color:var(--text-muted);margin-top:6px;font-style:italic">Consensus unavailable — only one search provider configured.</p>' : ''}
+      </div>
+      <div class="consensus-box">
+        <div class="cb-title">Result Coverage</div>
+        <div class="provider-row"><span>Sources discovered</span><strong>${sources}</strong></div>
+        <div class="provider-row"><span>Candidates</span><strong>${candidates}</strong></div>
+        <div class="provider-row"><span>Verified</span><strong>${verified}</strong></div>
+      </div>
     </div>
-    ${avail <= 1 ? '<p style="font-size:.8125rem;color:var(--text-muted);margin-bottom:12px">Only one search provider is configured — consensus reflects a single source.</p>' : ''}
-    ${errorChips ? `<div style="margin-bottom:12px">${errorChips}</div>` : ''}
-    <div class="consensus-grid">${rows || '<p style="color:var(--text-muted);font-size:.875rem">No candidate provider data.</p>'}</div>`;
+    ${Object.keys(errors).length ? `<div style="margin-top:12px;font-size:.75rem;color:var(--warning)">${Object.entries(errors).map(([p,e])=>`${esc(p)}: ${esc(e)}`).join(' · ')}</div>` : ''}`;
 }
 
-function renderCard(c, i) {
+function renderCard(c, i, isTop) {
   const handle = c.social_handle ? `<div class="cand-handle">${esc(c.social_handle)}</div>` : '';
   const tier = tierLabel(c);
-  return `<div class="cand-card">
+  const prov = (c.providers && c.providers.length) ? c.providers[0] : (c.provider || '—');
+  return `<div class="cand-card ${isTop?'rank-top':''}">
     <div class="cand-head"><span class="cand-rank">#${String(c.rank||i+1).padStart(2,'0')}</span>${badge(c.evidence_tier)}</div>
-    <div class="cand-thumb">${c.image_url?`<img src="${esc(c.image_url)}" alt="Candidate thumbnail" loading="lazy" onerror="this.style.display='none'">`:''}</div>
+    <div class="cand-thumb">${c.image_url?`<img src="${esc(c.image_url)}" alt="Candidate thumbnail" loading="lazy" onerror="this.style.display='none'"><span class="cand-score-badge">${c.evidence_score||0}</span>`:''}</div>
     <div class="cand-body">
-      <div style="display:flex;gap:6px;flex-wrap:wrap">${badge(c.source_type||'web',true)}${c.source_type==='social'&&c.evidence_tier==='verified'?'<span class="badge b-verified">Verified Social</span>':''}</div>
+      <div style="font-size:.625rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px">${esc(tier.split('—')[0].trim())}</div>
       <div class="cand-platform">${esc(c.platform||'Unknown')}</div>
       ${handle}
       <div class="cand-domain">${esc(c.domain||c.title||'')}</div>
-      <div class="cand-stats">
-        <div class="cand-stat"><div class="cs-l">Face Similarity</div><div class="cs-v">${(c.similarity*100).toFixed(1)}%</div></div>
-        <div class="cand-stat"><div class="cs-l">Evidence Score</div><div class="cs-v">${c.evidence_score||0}</div></div>
-        <div class="cand-stat"><div class="cs-l">Consensus</div><div class="cs-v">${esc(c.provider_consensus||'—')}</div></div>
-        <div class="cand-stat"><div class="cs-l">Status</div><div class="cs-v" style="font-size:.6875rem">${esc(tier)}</div></div>
+      <div class="cand-metrics">
+        <div class="cm"><div class="cm-l">Face</div><div class="cm-v">${(c.similarity*100).toFixed(1)}%</div></div>
+        ${c.image_similarity != null ? `<div class="cm"><div class="cm-l">Image</div><div class="cm-v">${(c.image_similarity*100).toFixed(1)}%</div></div>` : '<div class="cm"><div class="cm-l">Image</div><div class="cm-v">—</div></div>'}
+        <div class="cm"><div class="cm-l">Evidence</div><div class="cm-v">${c.evidence_score||0}</div></div>
       </div>
+      <div style="font-size:.625rem;color:var(--text-dim);margin-top:8px;font-family:var(--font-mono)">${esc(String(prov).toUpperCase())}</div>
     </div>
-    <div class="cand-footer"><a class="btn btn-secondary" href="${esc(c.url)}" target="_blank" rel="noopener">View Evidence</a></div>
+    <div class="cand-footer"><a class="btn btn-secondary btn-sm" href="${esc(c.url)}" target="_blank" rel="noopener">View Evidence</a></div>
   </div>`;
 }
 
@@ -896,33 +1185,52 @@ function renderPassport(p, bc) {
   $('passportPanel').classList.remove('hidden');
   const attested = p.integrity_status === 'attested';
   const tier = p.evidence_tier_label || tierLabel({ source_type: p.source_type, evidence_tier: p.evidence_tier });
-  const handle = p.social_handle || 'Username unavailable';
+  const handle = p.social_handle || '—';
+  const hash = p.content_hash || bc?.content_hash;
   $('passportCard').innerHTML = `
     <div class="passport-header">
-      <div><p style="font-size:.6875rem;font-weight:600;letter-spacing:.1em;color:var(--text-dim);margin-bottom:4px">EVIDENCECHAIN</p><h3>Evidence Passport</h3></div>
-      <div class="passport-status ${attested?'':'pending'}">${attested ? '✓ Attested' : p.integrity_status === 'fingerprinted' ? 'Fingerprinted' : 'Pending'}</div>
+      <div>
+        <p class="forensic-kicker">Official Record</p>
+        <h3 style="font-size:1.125rem;font-weight:700;color:var(--navy)">Evidence Passport</h3>
+        <div class="passport-id-block">${esc(p.evidence_id||'—')}</div>
+      </div>
+      <div class="passport-status ${attested?'':'pending'}">${attested ? '✓ CRYPTOGRAPHICALLY ATTESTED' : p.integrity_status === 'fingerprinted' ? 'FINGERPRINTED' : 'PENDING'}</div>
     </div>
-    <div class="passport-body">
-      <div class="passport-field"><div class="pf-k">Status</div><div class="pf-v">${esc(tier)}</div></div>
-      <div class="passport-field"><div class="pf-k">Evidence ID</div><div class="pf-v mono">${esc(p.evidence_id||'—')}</div></div>
-      <div class="passport-field"><div class="pf-k">Source</div><div class="pf-v">${esc(p.source_platform||'—')}</div></div>
-      <div class="passport-field"><div class="pf-k">Handle</div><div class="pf-v">${esc(handle)}</div></div>
-      <div class="passport-field"><div class="pf-k">Discovered</div><div class="pf-v">${p.discovered_at ? esc(p.discovered_at.slice(0,19).replace('T',' · ')) : '—'}</div></div>
-      <div class="passport-field"><div class="pf-k">Face Similarity</div><div class="pf-v">${p.face_similarity?(p.face_similarity*100).toFixed(1)+'%':'—'}</div></div>
-      <div class="passport-field"><div class="pf-k">Image Similarity</div><div class="pf-v">${p.image_similarity!=null?(p.image_similarity*100).toFixed(1)+'%':'—'}</div></div>
-      <div class="passport-field"><div class="pf-k">Evidence Score</div><div class="pf-v">${p.evidence_score||0} / 100</div></div>
-      <div class="passport-field"><div class="pf-k">Provider Consensus</div><div class="pf-v">${esc(p.provider_consensus||'—')}</div></div>
-      <div class="passport-field full"><div class="pf-k">Source URL</div><div class="pf-v"><a href="${esc(p.source_url||'#')}" target="_blank" rel="noopener">${esc(p.source_url||'—')}</a></div></div>
-      <div class="passport-field full"><div class="pf-k">SHA-256</div><div class="pf-v mono">${esc(p.content_hash||'—')}</div></div>
-      <div class="passport-field"><div class="pf-k">Blockchain</div><div class="pf-v">${esc(p.blockchain_network||'Ethereum Sepolia')}</div></div>
-      <div class="passport-field"><div class="pf-k">Attestation</div><div class="pf-v">${attested?'✓ Confirmed':'Pending'}</div></div>
-      <div class="passport-field full"><div class="pf-k">Transaction</div><div class="pf-v mono">${esc(p.tx_hash||bc?.tx_hash||'Not registered')}</div></div>
+    <div class="passport-sections">
+      <div class="passport-section"><div class="ps-head">Source</div>
+        <div class="passport-body" style="padding:0">
+          <div class="passport-field"><div class="pf-k">Platform</div><div class="pf-v">${esc(p.source_platform||'—')}</div></div>
+          <div class="passport-field"><div class="pf-k">Handle</div><div class="pf-v">${esc(handle)}</div></div>
+          <div class="passport-field full"><div class="pf-k">URL</div><div class="pf-v"><a href="${esc(p.source_url||'#')}" target="_blank" rel="noopener">${esc(p.source_url||'—')}</a></div></div>
+          <div class="passport-field"><div class="pf-k">Status</div><div class="pf-v">${esc(tier)}</div></div>
+        </div>
+      </div>
+      <div class="passport-section"><div class="ps-head">Discovery & Matching</div>
+        <div class="passport-body" style="padding:0">
+          <div class="passport-field"><div class="pf-k">Discovered</div><div class="pf-v">${p.discovered_at ? esc(p.discovered_at.slice(0,19).replace('T',' · ')) : '—'}</div></div>
+          <div class="passport-field"><div class="pf-k">Face Similarity</div><div class="pf-v">${p.face_similarity?(p.face_similarity*100).toFixed(1)+'%':'—'}</div></div>
+          <div class="passport-field"><div class="pf-k">Image Similarity</div><div class="pf-v">${p.image_similarity!=null?(p.image_similarity*100).toFixed(1)+'%':'—'}</div></div>
+          <div class="passport-field"><div class="pf-k">Evidence Strength</div><div class="pf-v">${p.evidence_score||0} / 100</div></div>
+        </div>
+      </div>
+      <div class="passport-section"><div class="ps-head">Fingerprint</div>
+        <div class="passport-body" style="padding:0">
+          <div class="passport-field full"><div class="pf-k">SHA-256</div><div class="pf-v mono">${esc(hash||'—')}</div></div>
+        </div>
+      </div>
+      <div class="passport-section"><div class="ps-head">Blockchain Proof</div>
+        <div class="passport-body" style="padding:0">
+          <div class="passport-field"><div class="pf-k">Network</div><div class="pf-v">${esc(p.blockchain_network||'Ethereum Sepolia')}</div></div>
+          <div class="passport-field"><div class="pf-k">Attestation</div><div class="pf-v">${attested?'✓ Confirmed':'Pending'}</div></div>
+          <div class="passport-field full"><div class="pf-k">Transaction</div><div class="pf-v mono">${esc(p.tx_hash||bc?.tx_hash||'Not registered')}</div></div>
+        </div>
+      </div>
     </div>
     <div class="passport-actions">
-      <button class="btn btn-primary" id="passportVerifyBtn"><i data-lucide="shield" style="width:16px;height:16px"></i> Verify Integrity</button>
-      ${p.tx_hash||bc?.tx_hash ? `<a class="btn btn-secondary" href="https://sepolia.etherscan.io/tx/${esc(p.tx_hash||bc.tx_hash)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:16px;height:16px"></i> View Transaction</a>` : ''}
-      <button class="btn btn-secondary" id="exportEvidenceBtn"><i data-lucide="download" style="width:16px;height:16px"></i> Export Evidence</button>
-      <button class="btn btn-secondary" id="copyEvidenceBtn"><i data-lucide="copy" style="width:16px;height:16px"></i> Copy Evidence ID</button>
+      <button class="btn btn-primary btn-sm" id="passportVerifyBtn"><i data-lucide="shield" style="width:16px;height:16px"></i> Verify Integrity</button>
+      ${p.tx_hash||bc?.tx_hash ? `<a class="btn btn-secondary btn-sm" href="https://sepolia.etherscan.io/tx/${esc(p.tx_hash||bc.tx_hash)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:16px;height:16px"></i> View Blockchain</a>` : ''}
+      <button class="btn btn-secondary btn-sm" id="exportEvidenceBtn"><i data-lucide="download" style="width:16px;height:16px"></i> Export Evidence</button>
+      <button class="btn btn-secondary btn-sm" id="copyEvidenceBtn"><i data-lucide="copy" style="width:16px;height:16px"></i> Copy Evidence ID</button>
     </div>`;
   $('passportCard').insertAdjacentHTML('beforeend', `
     <div class="passport-chain-check">
@@ -1001,17 +1309,21 @@ function renderBlockchain(d) {
   const hash = bc?.content_hash || p?.content_hash;
   const attested = bc?.verified || p?.integrity_status === 'attested';
   $('blockchainContent').innerHTML = `
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px">
-      <span class="chain-status ${attested?'attested':tx?'pending':'none'}">${attested?'✓ Attested':tx?'Processing':'Not Attested'}</span>
-      <span style="font-size:.875rem;color:var(--text-muted)">Ethereum · Sepolia Testnet</span>
-    </div>
-    <div class="passport-body" style="padding:0">
-      <div class="passport-field"><div class="pf-k">Status</div><div class="pf-v">${attested?'Registered on-chain':tx?'Transaction submitted':'Unavailable — configure Sepolia keys'}</div></div>
-      <div class="passport-field"><div class="pf-k">Transaction</div><div class="pf-v mono">${tx ? esc(tx) : '—'}</div></div>
-      <div class="passport-field"><div class="pf-k">Block</div><div class="pf-v">${bc?.block_number ? '#'+bc.block_number : '—'}</div></div>
-      <div class="passport-field full"><div class="pf-k">Fingerprint</div><div class="pf-v mono">${hash ? esc(hash) : '—'}</div></div>
-    </div>
-    ${tx ? `<a class="btn btn-secondary" style="margin-top:16px" href="https://sepolia.etherscan.io/tx/${esc(tx)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:16px;height:16px"></i> View on Explorer</a>` : ''}`;
+    <div class="chain-proof" style="margin:0">
+      <div class="chain-proof-head">
+        <h3>Blockchain Proof</h3>
+        <div class="cph-status">${attested?'✓ CONFIRMED':tx?'PROCESSING':'NOT ATTESTED'}</div>
+      </div>
+      <div class="chain-proof-body">
+        ${p?.evidence_id ? `<div class="chain-field"><div class="cf-k">Evidence ID</div><div class="cf-v">${esc(p.evidence_id)}</div></div>` : ''}
+        <div class="chain-field"><div class="cf-k">Network</div><div class="cf-v">Ethereum Sepolia</div></div>
+        <div class="chain-field"><div class="cf-k">Attestation</div><div class="cf-v">${attested?'✓ Confirmed':tx?'Submitted':'Unavailable — configure Sepolia keys'}</div></div>
+        ${hash ? `<div class="chain-field"><div class="cf-k">Fingerprint</div><div class="cf-v">${esc(hash)}</div></div>` : ''}
+        <div class="chain-field"><div class="cf-k">Transaction</div><div class="cf-v">${tx ? esc(tx) : '—'}</div></div>
+        <div class="chain-field"><div class="cf-k">Block</div><div class="cf-v">${bc?.block_number ? '#'+bc.block_number : '—'}</div></div>
+      </div>
+      ${tx ? `<div style="padding:0 16px 14px"><a class="btn btn-secondary btn-sm" href="https://sepolia.etherscan.io/tx/${esc(tx)}" target="_blank" rel="noopener"><i data-lucide="external-link" style="width:14px;height:14px"></i> View on Explorer</a></div>` : ''}
+    </div>`;
   icons();
 }
 
