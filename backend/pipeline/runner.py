@@ -299,7 +299,35 @@ class PipelineRunner:
         self._sync_progress(job_id, timeline, result, phase="searching")
         search = search_web(search_image, precropped=search_image)
 
-        # 2b. Keyless social fallback when keyed providers return nothing
+        # 2b. Keyless fallbacks when keyed providers return nothing.
+        #     First a genuine VISUAL search (Yandex CBIR, no key, no hint
+        #     needed), then the hint-seeded text-based social APIs.
+        if not search.has_results:
+            timeline.start(
+                "search",
+                f"Keyed providers: {provider_hint or 'none configured'} — "
+                "trying keyless Yandex CBIR reverse-image search",
+            )
+            self._sync_progress(job_id, timeline, result, phase="searching_yandex")
+            from backend.search.visual_search import keyless_visual_search
+
+            yandex = keyless_visual_search(search_image)
+            if yandex.has_results:
+                search = yandex
+                timeline.succeed(
+                    "search",
+                    f"{len(yandex.results)} hits from yandex_cbir (keyless)",
+                )
+            else:
+                result.provider_errors = {
+                    **result.provider_errors,
+                    "yandex_cbir": yandex.error,
+                }
+                timeline.info(
+                    "search",
+                    f"Yandex CBIR unavailable: {yandex.error}",
+                )
+
         if not search.has_results and self.hint:
             timeline.start(
                 "search",

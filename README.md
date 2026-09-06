@@ -27,7 +27,8 @@ fingerprints the matched post with SHA-256, and can register that hash on the
 
 - 🧬 **512-D face embeddings** via InsightFace `buffalo_l` (ArcFace recognition head)
 - 🔎 **Reverse image search** across multiple providers (OpenWeb Ninja,
-  SerpAPI, TinEye) with automatic fallback
+  SerpAPI Google Lens `type=all`, TinEye) with automatic fallback
+  + a **keyless Yandex CBIR** visual search that works with no API key
 - ✅ **Tiered face matching** — evidence from *page content* (verified) *and*
   search *thumbnails* (login-walled posts)
 - 🔐 **Tamper-evident fingerprinting** — canonical record → SHA-256 hash
@@ -284,6 +285,7 @@ face-web-blockchain/
 │   │   └── matcher.py          # Cosine-similarity matching + evidence tiers
 │   ├── search/
 │   │   ├── visual_search.py    # Reverse image search (multi-provider fallback)
+│   │   ├── yandex.py           # Keyless Yandex CBIR visual search
 │   │   ├── image_host.py       # Publish local uploads to a temp public URL
 │   │   └── search_models.py    # Search-result data classes
 │   ├── crawler/
@@ -340,7 +342,10 @@ face-web-blockchain/
    deduplicates results with consensus ranking. Only the top
    `MAX_SEARCH_RESULTS` (default **10**) results are evaluated by face
    matching. When no keys are present it falls back to keyless social APIs
-   (Bluesky / Mastodon / Reddit) seeded by a `--hint`. OpenWeb Ninja and
+   (Bluesky / Mastodon / Reddit) seeded by a `--hint`. When keyed providers
+   return nothing, a **keyless Yandex CBIR** reverse-image search runs first
+   (a genuine visual search needing no key or hint), then the hint-seeded
+   social text search. OpenWeb Ninja and
    SerpAPI search by image URL, so local uploads are published to a temporary
    public host first (`backend/search/image_host.py`).
 3. **Similarity threshold** — `0.4` cosine similarity (InsightFace convention).

@@ -79,7 +79,7 @@ class SerpApiProvider(_Provider):
     def search(self, image_path: str) -> SearchResponse:
         key = _env("SERPAPI_API_KEY")
         try:
-            params = {"engine": "google_lens", "api_key": key}
+            params = {"engine": "google_lens", "type": "all", "api_key": key}
             if image_path.startswith(("http://", "https://")):
                 params["url"] = image_path
             else:
@@ -325,3 +325,45 @@ def _search_payload(image_path: str, provider: str) -> SearchResponse:
 
 def _other(named: _Provider) -> list[_Provider]:
     return [p for p in PROVIDERS if p is not named]
+
+
+def keyless_visual_search(image_path: str, limit: int = 10) -> SearchResponse:
+    """Keyless Yandex CBIR reverse-image search (no API key needed).
+
+    Used as a fallback when no keyed provider is configured (or all keyed
+    providers return nothing). ``image_path`` may be a local file (published
+    to a temporary public host) or an already-public HTTP(S) URL. Seeded by
+    the image itself, so it does *not* require a textual ``hint`` — unlike
+    the text-based social fallback.
+
+    Returns a shaped :class:`SearchResponse`; never raises.
+    """
+    try:
+        from backend.search.yandex import YandexCbirError, yandex_reverse_search
+
+        public_url = ""
+        if image_path.startswith(("http://", "https://")):
+            public_url = image_path
+        else:
+            public_url = host_image(image_path)
+        if not public_url:
+            return SearchResponse(
+                provider="yandex_cbir",
+                error="Could not publish image to a public URL for Yandex CBIR",
+            )
+        results = yandex_reverse_search(public_url)
+        if not results:
+            return SearchResponse(
+                provider="yandex_cbir",
+                error="Yandex CBIR returned no matches",
+            )
+        return SearchResponse(
+            results=results[:limit],
+            provider="yandex_cbir",
+            providers_used=["yandex_cbir"],
+            providers_available=1,
+        )
+    except YandexCbirError as exc:
+        return SearchResponse(provider="yandex_cbir", error=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return SearchResponse(provider="yandex_cbir", error=str(exc))
