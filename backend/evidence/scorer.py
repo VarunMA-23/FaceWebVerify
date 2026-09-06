@@ -89,3 +89,15 @@ def build_provider_consensus(
         provider_consensus=label,
         consensus_score=round(score, 3),
     )
+
+
+def confidence_grade(score: int) -> str:
+    """Return human-readable confidence grade (A/B/C/F) from 0-100 score."""
+    if score >= 85:
+        return "A (High Confidence Match)"
+    if score >= 70:
+        return "B (Moderate Match)"
+    if score >= 50:
+        return "C (Low/Probable Match)"
+    return "F (Unverified/Weak Match)"
+

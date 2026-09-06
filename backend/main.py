@@ -59,7 +59,35 @@ app.include_router(chain_router)
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"service": "Face-Web-Blockchain Pipeline", "status": "ok"}
+    from backend.blockchain.config import get_anchor_mode
+    from backend.search.visual_search import PROVIDERS
+    
+    active_providers = [p.name for p in PROVIDERS if p.available()]
+    anchor_mode = get_anchor_mode()
+    
+    chain_info: dict = {
+        "mode": anchor_mode,
+        "status": "healthy",
+    }
+    if anchor_mode == "local":
+        try:
+            from backend.blockchain.localchain import LocalChain
+            lc = LocalChain()
+            height = len(lc.load_chain())
+            is_valid, _ = lc.verify_chain()
+            chain_info.update({
+                "height": height,
+                "chain_valid": is_valid,
+            })
+        except Exception as e:
+            chain_info["status"] = f"error: {e}"
+            
+    return {
+        "service": "Face-Web-Blockchain Pipeline",
+        "status": "ok",
+        "blockchain": chain_info,
+        "providers_active": active_providers,
+    }
 
 
 # Serve the static frontend when SERVE_FRONTEND is enabled (single-port mode).

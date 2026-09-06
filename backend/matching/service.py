@@ -335,10 +335,27 @@ class MatcherService:
                 p_hash = image_sha256_from_file(cache.page_local)
                 if t_hash == p_hash:
                     cache.image_similarity = 1.0
-                elif ev.thumbnail_match and ev.page_match and ev.thumbnail_match.is_match and ev.page_match.is_match:
-                    cache.image_similarity = round(float(min(ev.thumbnail_match.score, ev.page_match.score)), 3)
                 else:
-                    cache.image_similarity = None
+                    # Attempt perceptual hash comparison
+                    try:
+                        from PIL import Image as PILImg
+                        from backend.fingerprint.phash import compute_phash, phash_similarity
+                        t_img = PILImg.open(cache.thumbnail_local)
+                        p_img = PILImg.open(cache.page_local)
+                        ph1 = compute_phash(t_img)
+                        ph2 = compute_phash(p_img)
+                        p_sim = phash_similarity(ph1, ph2)
+                        if p_sim is not None and p_sim >= 0.7:
+                            cache.image_similarity = round(p_sim, 3)
+                        elif ev.thumbnail_match and ev.page_match and ev.thumbnail_match.is_match and ev.page_match.is_match:
+                            cache.image_similarity = round(float(min(ev.thumbnail_match.score, ev.page_match.score)), 3)
+                        else:
+                            cache.image_similarity = p_sim
+                    except Exception:
+                        if ev.thumbnail_match and ev.page_match and ev.thumbnail_match.is_match and ev.page_match.is_match:
+                            cache.image_similarity = round(float(min(ev.thumbnail_match.score, ev.page_match.score)), 3)
+                        else:
+                            cache.image_similarity = None
             except Exception:  # noqa: BLE001
                 cache.image_similarity = None
         self._results[index] = ev

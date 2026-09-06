@@ -154,6 +154,8 @@ class PipelineRunner:
             self.limit = max(1, int(self.limit or 1))
             self._execute(job_id, saved, result, timeline)
         except Exception as exc:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
             result.status = "failed"
             result.error = str(exc)
             self.db.update_job_status(job_id, "failed")
@@ -245,6 +247,31 @@ class PipelineRunner:
         result.face_detected = True
         result.face_confidence = float(face.confidence)
         timeline.succeed("face", f"Confidence {result.face_confidence:.3f}")
+
+        # Assess face quality (non-blocking)
+        try:
+            from backend.face.quality import assess_quality
+            raw_img = None
+            try:
+                from backend.face.model import read_image
+                raw_img = read_image(image_path)
+            except Exception:
+                pass
+            fq = assess_quality(face, raw_img)
+            result.summary["face_quality"] = {
+                "score": fq.score,
+                "sharpness": fq.sharpness,
+                "size_score": fq.size_score,
+                "landmark_score": fq.landmark_score,
+                "warnings": fq.warnings,
+            }
+            if fq.warnings:
+                for w in fq.warnings:
+                    timeline.warn("face", f"Quality warning: {w}")
+            timeline.info("face", f"Quality score: {fq.score:.2f}/1.00 ({fq.summary()})")
+        except Exception as e:
+            pass
+
         timeline.succeed("embedding", "512-D ArcFace embedding generated")
         self._sync_progress(job_id, timeline, result, phase="face_complete")
 

@@ -25,6 +25,18 @@ def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
+def _with_retry(fn, retries: int = 3, base_delay: float = 1.0):
+    """Execute fn with exponential backoff retry logic on network errors."""
+    import time
+    for attempt in range(retries):
+        try:
+            return fn()
+        except (requests.RequestException, TimeoutError) as exc:
+            if attempt == retries - 1:
+                raise exc
+            time.sleep(base_delay * (2 ** attempt))
+
+
 def _max_search_results(default: int = 10) -> int:
     """Configurable ceiling on results kept per provider.
 
@@ -78,12 +90,15 @@ class SerpApiProvider(_Provider):
                         error="Could not publish image to a public URL",
                     )
                 params["url"] = image_url
-            resp = requests.get(
-                "https://serpapi.com/search.json",
-                params=params,
-                timeout=30,
-            )
-            resp.raise_for_status()
+            def _do_get():
+                r = requests.get(
+                    "https://serpapi.com/search.json",
+                    params=params,
+                    timeout=30,
+                )
+                r.raise_for_status()
+                return r
+            resp = _with_retry(_do_get)
             data = resp.json()
         except Exception as exc:  # noqa: BLE001
             return SearchResponse(provider=self.name, error=str(exc))

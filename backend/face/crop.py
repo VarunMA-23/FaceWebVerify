@@ -34,25 +34,11 @@ def _clamp_int(value: float, low: int, high: int) -> int:
 
 def crop_to_face(
     image: np.ndarray,
-    face: FaceDetection,
+    face: object,
     margin: float = DEFAULT_FACE_MARGIN,
 ) -> np.ndarray:
-    """Crop a BGR ``image`` to a face bounding box with ``margin`` padding.
-
-    The face bbox is expanded by ``margin`` fractions of its own width/height
-    on each side, then clamped to the image bounds. A ``margin`` of ``0.0``
-    yields a tight crop exactly at the detection box.
-
-    Args:
-        image: BGR numpy array (as returned by :func:`read_image`).
-        face: A :class:`FaceDetection` with a populated ``bbox``.
-        margin: Fractional padding added around the face (default ``0.5``).
-
-    Returns:
-        A cropped BGR numpy array. If the face bbox is invalid/empty the
-        original image is returned unchanged.
-    """
-    if len(face.bbox) < 4:
+    bbox = getattr(face, "bbox", []) or []
+    if len(bbox) < 4:
         return image
 
     h, w = image.shape[:2]

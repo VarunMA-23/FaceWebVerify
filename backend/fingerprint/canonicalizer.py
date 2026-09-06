@@ -70,6 +70,7 @@ class EvidenceRecord:
     image_similarity: float | None = None
     evidence_tier: str = ""
     image_sha256: str = ""
+    image_phash: str = ""
     caption: str = ""
     title: str = ""
     providers: list[str] = field(default_factory=list)

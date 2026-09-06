@@ -211,8 +211,45 @@ def _run_job(
         runner.limit = limit
         runner.threshold = threshold
         runner.run(data, filename or "upload.jpg", job_id=job_id, hint=hint)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
         db.update_job_status(job_id, "failed")
+
+
+@router.get("/{job_id}/stream")
+async def stream_search(job_id: str, db: Database = Depends(get_db)):
+    """Server-Sent Events (SSE) stream for real-time job timeline and status updates."""
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    async def event_generator():
+        last_phase = ""
+        while True:
+            job_state = db.get_job(job_id)
+            if not job_state:
+                break
+            meta = db.get_job_metadata(job_id)
+            timeline = meta.get("timeline", [])
+            phase = meta.get("phase", job_state.get("status", "unknown"))
+
+            data = json.dumps({
+                "job_id": job_id,
+                "status": job_state.get("status"),
+                "phase": phase,
+                "timeline": timeline,
+            })
+            yield f"data: {data}\n\n"
+
+            if job_state.get("status") in ("completed", "failed"):
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/{job_id}", response_model=SearchResponseModel)
