@@ -10,3 +10,5 @@ python-multipart
 pytest
 python-dotenv
 httpx
+rich
+questionary

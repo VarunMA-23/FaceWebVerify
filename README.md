@@ -109,6 +109,9 @@ OPENWEBNINJA_API_KEY=
 SERPAPI_API_KEY=
 TINEYE_API_KEY=
 
+# Max reverse-search results evaluated by face matching (default 10)
+MAX_SEARCH_RESULTS=10
+
 # Blockchain — optional
 # Local hash-linked Merkle ledger is the DEFAULT anchor backend (no config).
 # EVM (Sepolia) is opt-in via BLOCKCHAIN_ANCHOR=evm (requires `pip install -r requirements-evm.txt`):
@@ -125,9 +128,16 @@ SEPOLIA_CONTRACT_ADDRESS=
 
 ## ▶️ Running the pipeline (CLI)
 
-The standalone runner executes the full end-to-end flow on a single image:
+The standalone runner executes the full end-to-end flow on a single image. Run
+it with **no arguments** for a guided, interactive wizard (pick a file, tune
+threshold/candidates/provider/anchor, and watch each stage live), or pass an
+image path for a scripted batch run:
 
 ```bash
+# Interactive guided wizard
+python run_pipeline.py
+
+# Scripted / batch run
 python run_pipeline.py <image_path> [options]
 ```
 
@@ -137,13 +147,22 @@ python run_pipeline.py <image_path> [options]
 | `--limit N` | `5` | Max candidates to evaluate |
 | `--match-threshold F` | `0.4` | Cosine-similarity match threshold |
 | `--evidence-tier` | `all` | `all` or `verified_only` (which match tiers qualify) |
+| `--provider` | `auto` | `auto`, `openwebninja`, `serpapi`, `tineye`, or `keyless` |
+| `--hint TEXT` | — | Text seed for the keyless social fallback |
 | `--do-blockchain` | off | Force blockchain registration |
 | `--no-blockchain` | — | Skip blockchain step |
+| `--anchor` | prompt/`auto` | `auto`, `local`, `evm`, or `none` |
+| `--chain-dir DIR` | — | Chain data directory (default `./chaindata`) |
+| `--difficulty N` | config | PoW difficulty bits for the local chain (`0` = off) |
+| `--verify` | — | Re-run verification checks after anchoring |
 
 ### Examples
 
 ```bash
-# Basic run (detect, search, match, fingerprint)
+# Interactive wizard
+python run_pipeline.py
+
+# Basic batch run (detect, search, match, fingerprint)
 python run_pipeline.py myface.jpg
 
 # Only accept verified (page-content) matches, evaluate 10 candidates
@@ -152,6 +171,9 @@ python run_pipeline.py myface.jpg --limit 10 --evidence-tier verified_only
 # Include on-chain registration + verification.
 # Anchors to the local Merkle ledger by default; pass --anchor evm to use Sepolia.
 python run_pipeline.py myface.jpg --do-blockchain
+
+# Use only the keyless social fallback (Bluesky/Mastodon/Reddit) with a hint
+python run_pipeline.py myface.jpg --provider keyless --hint "Skye Ray"
 
 # Raise the match threshold
 python run_pipeline.py myface.jpg --match-threshold 0.5
@@ -313,8 +335,12 @@ face-web-blockchain/
 1. **Face model** — InsightFace `buffalo_l` (ArcFace recognition head), 512-d
    L2-normalized embeddings, CPU provider by default.
 2. **Visual search** — provider list (OpenWeb Ninja, SerpAPI, TinEye), chosen
-   by which keys exist in `.env`. `search_web()`
-   falls through to the first provider that returns results. OpenWeb Ninja and
+   by which keys exist in `.env`. With `provider=auto` (the default),
+   `search_web()` runs **all configured providers in parallel** and merges /
+   deduplicates results with consensus ranking. Only the top
+   `MAX_SEARCH_RESULTS` (default **10**) results are evaluated by face
+   matching. When no keys are present it falls back to keyless social APIs
+   (Bluesky / Mastodon / Reddit) seeded by a `--hint`. OpenWeb Ninja and
    SerpAPI search by image URL, so local uploads are published to a temporary
    public host first (`backend/search/image_host.py`).
 3. **Similarity threshold** — `0.4` cosine similarity (InsightFace convention).
