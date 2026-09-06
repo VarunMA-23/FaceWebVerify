@@ -49,8 +49,20 @@ def _search_provider(prov: _Provider, image_path: str) -> SearchResponse:
     return prov.search(image_path)
 
 
-def search_all_providers(image_path: str) -> AggregatedSearchResponse:
-    """Run all configured providers in parallel and aggregate results."""
+def search_all_providers(
+    image_path: str,
+    limit: int | None = None,
+) -> AggregatedSearchResponse:
+    """Run all configured providers in parallel and aggregate results.
+
+    Only the top ``limit`` results (default 10) are returned so face matching
+    never runs over the provider's entire result set.
+    """
+    if limit is None:
+        from backend.search.visual_search import MAX_SEARCH_RESULTS
+
+        limit = MAX_SEARCH_RESULTS
+    limit = max(1, int(limit))
     available = [p for p in PROVIDERS if p.available()]
     if not available:
         return AggregatedSearchResponse(
@@ -105,7 +117,7 @@ def search_all_providers(image_path: str) -> AggregatedSearchResponse:
     results = sorted(
         grouped.values(),
         key=lambda r: (-r.provider_count, r.best_rank),
-    )
+    )[:limit]
 
     used = [n for n, r in responses.items() if r.has_results]
     if not results:

@@ -25,6 +25,22 @@ def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
+def _max_search_results(default: int = 10) -> int:
+    """Configurable ceiling on results kept per provider.
+
+    Controlled by ``MAX_SEARCH_RESULTS`` (default 10): only the top N
+    results from a reverse search provider are used for face matching.
+    """
+    raw = _env("MAX_SEARCH_RESULTS")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_SEARCH_RESULTS = _max_search_results()
+
+
 @dataclass
 class _Provider:
     name: str
@@ -82,7 +98,10 @@ class SerpApiProvider(_Provider):
             )
             if sr.url:
                 results.append(sr)
-        return SearchResponse(results=results, provider=self.name)
+        return SearchResponse(
+            results=results[:MAX_SEARCH_RESULTS],
+            provider=self.name,
+        )
 
 
 class TinEyeProvider(_Provider):
@@ -107,7 +126,7 @@ class TinEyeProvider(_Provider):
             return SearchResponse(provider=self.name, error=str(exc))
 
         results: list[SearchResult] = []
-        for match in data.get("results", [])[:20]:
+        for match in data.get("results", [])[:MAX_SEARCH_RESULTS]:
             sr = SearchResult(
                 url=match.get("backlink", {}).get("backlink", ""),
                 image_url="",
@@ -116,7 +135,10 @@ class TinEyeProvider(_Provider):
             )
             if sr.url:
                 results.append(sr)
-        return SearchResponse(results=results, provider=self.name)
+        return SearchResponse(
+            results=results[:MAX_SEARCH_RESULTS],
+            provider=self.name,
+        )
 
 
 class OpenWebNinjaProvider(_Provider):
@@ -144,7 +166,7 @@ class OpenWebNinjaProvider(_Provider):
                     )
             resp = requests.get(
                 self.endpoint,
-                params={"url": image_url, "limit": 100, "safe_search": "off"},
+                params={"url": image_url, "limit": MAX_SEARCH_RESULTS, "safe_search": "off"},
                 headers={"x-api-key": key},
                 timeout=30,
             )
@@ -163,7 +185,10 @@ class OpenWebNinjaProvider(_Provider):
             )
             if sr.url:
                 results.append(sr)
-        return SearchResponse(results=results, provider=self.name)
+        return SearchResponse(
+            results=results[:MAX_SEARCH_RESULTS],
+            provider=self.name,
+        )
 
 
 PROVIDERS = [
@@ -256,6 +281,7 @@ def _search_payload(image_path: str, provider: str) -> SearchResponse:
                 continue
             resp = prov.search(image_path)
             if resp.has_results:
+                resp.results = resp.results[:MAX_SEARCH_RESULTS]
                 return resp
         errors = [p.name for p in candidates if p.configured]
         return SearchResponse(
@@ -263,7 +289,7 @@ def _search_payload(image_path: str, provider: str) -> SearchResponse:
             error="No configured provider returned results",
         )
 
-    aggregated = search_all_providers(image_path)
+    aggregated = search_all_providers(image_path, limit=MAX_SEARCH_RESULTS)
     if not aggregated.has_results:
         return SearchResponse(
             provider=aggregated.provider,

@@ -37,3 +37,6 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+# Working-tree backup snapshot
+._wt_base/

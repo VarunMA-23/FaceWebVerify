@@ -131,6 +131,68 @@ def test_openwebninja_routes_local_image_through_host(monkeypatch):
     assert hosted.get("path", "").endswith("lena.jpg")
 
 
+def test_provider_results_capped_to_max(monkeypatch):
+    """A provider returning > MAX_SEARCH_RESULTS keeps only the top N."""
+    import backend.search.visual_search as vs
+
+    monkeypatch.setattr(vs, "MAX_SEARCH_RESULTS", 10)
+    payload = {
+        "status": "OK",
+        "data": [
+            {
+                "title": f"Item {i}",
+                "link": f"https://example.com/item/{i}",
+                "image": f"https://example.com/{i}.jpg",
+            }
+            for i in range(25)
+        ],
+    }
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(vs.requests, "get", fake_get)
+    monkeypatch.setattr(
+        vs, "host_image", lambda path: "https://tmp.example/hosted.jpg"
+    )
+
+    provider = OpenWebNinjaProvider("openwebninja")
+    resp = provider.search(os.path.join(FIXTURES, "lena.jpg"))
+
+    assert len(resp.results) == 10
+    assert resp.results[0].url == "https://example.com/item/0"
+
+
+def test_aggregation_caps_to_limit(monkeypatch):
+    """search_all_providers returns at most the top ``limit`` results."""
+    from backend.evidence.consensus import search_all_providers
+    from backend.search.search_models import SearchResult
+
+    class _Bulk(OpenWebNinjaProvider):
+        def available(self):
+            return True
+
+        def search(self, image_path):
+            from backend.search.search_models import SearchResponse
+
+            return SearchResponse(
+                results=[
+                    SearchResult(url=f"https://example.com/item/{i}")
+                    for i in range(30)
+                ],
+                provider=self.name,
+            )
+
+    monkeypatch.setattr(
+        "backend.evidence.consensus.PROVIDERS", [_Bulk("openwebninja")]
+    )
+    resp = search_all_providers(os.path.join(FIXTURES, "lena.jpg"), limit=10)
+
+    assert resp.has_results
+    assert len(resp.results) == 10
+    assert resp.results[0].url == "https://example.com/item/0"
+
+
 def test_no_key_returns_graceful_response(monkeypatch):
     """Without keys search_web returns an empty-but-shaped response."""
     for key in (
