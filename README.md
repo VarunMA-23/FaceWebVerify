@@ -39,17 +39,9 @@ fingerprints the matched post with SHA-256, and can register that hash on the
 
 ## 🧠 How it works
 
-```
-┌────────────┐   ┌─────────────────┐   ┌──────────────────┐   ┌───────────────┐
-│ Upload     │ → │ Visual search   │ → │ Tiered face      │ → │ Fingerprint   │
-│ face image │   │ (multiple APIs) │   │ matching         │   │ (SHA-256)     │
-└────────────┘   └─────────────────┘   └──────────────────┘   └───────┬───────┘
-                                                                      ▼
-                                                          ┌───────────────────┐
-                                                          │ Blockchain        │
-                                                          │ register + verify │
-                                                          └───────────────────┘
-```
+<p align="center">
+  <img src="assets/facewebverify_architecture.jpg" alt="Architecture Overview" width="800"/>
+</p>
 
 ### Evidence tiers
 | Tier | Source | Meaning |
